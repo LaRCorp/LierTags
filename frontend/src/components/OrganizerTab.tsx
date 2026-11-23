@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { Track, OrganizePreviewItem, OrganizeAction, OrganizeSummary } from '../types';
@@ -12,13 +13,13 @@ import {
   RefreshCw,
   FolderTree,
   AlertCircle,
-  Search,
   X,
   CheckSquare,
   Square,
   UserCheck,
   Filter,
   ArrowLeft,
+  Search,
 } from 'lucide-react';
 
 interface OrganizerTabProps {
@@ -59,6 +60,9 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
   const [summaryResult, setSummaryResult] = useState<OrganizeSummary | null>(null);
   const [filterMode, setFilterMode] = useState<'all' | 'movable' | 'conflicts'>('all');
 
+  const candidatesScrollRef = useRef<HTMLDivElement>(null);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+
   // Extract unique artists list with track counts
   const artistList = useMemo(() => {
     const map = new Map<string, number>();
@@ -69,7 +73,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [tracks]);
 
-  // Filter candidate tracks by search query and selected artist
+  // Filter candidate tracks by global search query (from header) and selected artist
   const filteredCandidates = useMemo(() => {
     return tracks.filter((t) => {
       // 1. Artist filter
@@ -78,7 +82,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
         if (art.toLowerCase() !== selectedArtist.toLowerCase()) return false;
       }
 
-      // 2. Search query filter
+      // 2. Global search query filter (from top header)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const title = (t.metadata.title || '').toLowerCase();
@@ -100,6 +104,14 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
       return true;
     });
   }, [tracks, selectedArtist, searchQuery]);
+
+  // Virtualizer for candidate tracks
+  const candidatesVirtualizer = useVirtualizer({
+    count: filteredCandidates.length,
+    getScrollElement: () => candidatesScrollRef.current,
+    estimateSize: () => 36,
+    overscan: 12,
+  });
 
   // Target folder picker
   const handleSelectTargetFolder = async () => {
@@ -148,7 +160,6 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
     onUpdateSelectedTrackIds(new Set());
   };
 
-  // Select all tracks for chosen artist
   const handleSelectArtistTracks = (artistName: string) => {
     setSelectedArtist(artistName);
     const next = new Set<string>();
@@ -161,9 +172,6 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
     onUpdateSelectedTrackIds(next);
   };
 
-  // Determine which tracks are being organized:
-  // If user has checked specific tracks, use those.
-  // Otherwise, if user has filtered tracks (by artist/search), offer to use those.
   const tracksToOrganize = useMemo(() => {
     if (selectedTrackIds.size > 0) {
       return tracks.filter((t) => selectedTrackIds.has(t.id));
@@ -198,7 +206,6 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
       });
 
       setPreviewItems(items);
-      // By default, check all items that are ready/will move
       const initialChecked = new Set<string>();
       for (const it of items) {
         if (it.will_move) {
@@ -214,7 +221,23 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
     }
   };
 
-  // Toggle single item in preview table
+  // Filter preview list
+  const filteredPreview = useMemo(() => {
+    return previewItems.filter((item) => {
+      if (filterMode === 'movable') return item.will_move;
+      if (filterMode === 'conflicts') return item.status === 'target_exists' || item.status === 'missing_tags';
+      return true;
+    });
+  }, [previewItems, filterMode]);
+
+  // Virtualizer for preview table
+  const previewVirtualizer = useVirtualizer({
+    count: filteredPreview.length,
+    getScrollElement: () => previewScrollRef.current,
+    estimateSize: () => 40,
+    overscan: 12,
+  });
+
   const handleTogglePreviewItem = (origPath: string) => {
     setCheckedPreviewPaths((prev) => {
       const next = new Set(prev);
@@ -227,7 +250,6 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
     });
   };
 
-  // Master toggle in preview table
   const handleToggleAllPreviewItems = () => {
     const movable = previewItems.filter((i) => i.will_move);
     const allChecked = movable.every((i) => checkedPreviewPaths.has(i.original_path));
@@ -243,12 +265,14 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
     }
   };
 
-  const finalMovableActions: OrganizeAction[] = previewItems
-    .filter((i) => i.will_move && checkedPreviewPaths.has(i.original_path))
-    .map((item) => ({
-      original_path: item.original_path,
-      destination_path: item.destination_path,
-    }));
+  const finalMovableActions: OrganizeAction[] = useMemo(() => {
+    return previewItems
+      .filter((i) => i.will_move && checkedPreviewPaths.has(i.original_path))
+      .map((item) => ({
+        original_path: item.original_path,
+        destination_path: item.destination_path,
+      }));
+  }, [previewItems, checkedPreviewPaths]);
 
   const handleExecuteOrganization = async () => {
     if (finalMovableActions.length === 0) return;
@@ -272,12 +296,19 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
     }
   };
 
-  // Filter preview list
-  const filteredPreview = previewItems.filter((item) => {
-    if (filterMode === 'movable') return item.will_move;
-    if (filterMode === 'conflicts') return item.status === 'target_exists' || item.status === 'missing_tags';
-    return true;
-  });
+  const candVirtualItems = candidatesVirtualizer.getVirtualItems();
+  const candPaddingTop = candVirtualItems.length > 0 ? candVirtualItems[0]?.start || 0 : 0;
+  const candPaddingBottom =
+    candVirtualItems.length > 0
+      ? candidatesVirtualizer.getTotalSize() - (candVirtualItems[candVirtualItems.length - 1]?.end || 0)
+      : 0;
+
+  const prevVirtualItems = previewVirtualizer.getVirtualItems();
+  const prevPaddingTop = prevVirtualItems.length > 0 ? prevVirtualItems[0]?.start || 0 : 0;
+  const prevPaddingBottom =
+    prevVirtualItems.length > 0
+      ? previewVirtualizer.getTotalSize() - (prevVirtualItems[prevVirtualItems.length - 1]?.end || 0)
+      : 0;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#14151b] border border-[#262835] rounded-lg overflow-hidden shadow-xl">
@@ -293,7 +324,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
           </div>
 
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-[#828698]">Всего в библиотеке:</span>
+            <span className="text-[#828698]">Библиотека:</span>
             <span className="font-semibold text-white">{tracks.length}</span>
             <span className="text-[#323544]">|</span>
             <span className="text-[#828698]">Выбрано для сортировки:</span>
@@ -303,10 +334,10 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
           </div>
         </div>
 
-        {/* Filter Bar: Artist Selector & Search Query */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-center bg-[#13141a] p-2.5 rounded-md border border-[#2a2d3c]">
+        {/* Filter Bar: Artist Selector + Global Search Indicator (No duplicate input) */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 bg-[#13141a] p-2.5 rounded-md border border-[#2a2d3c]">
           {/* Artist Dropdown Filter */}
-          <div className="lg:col-span-5 flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-[280px] flex-1 max-w-md">
             <UserCheck className="w-4 h-4 text-[#39C5BB] shrink-0" />
             <span className="text-xs text-[#9EA2B0] shrink-0">Исполнитель:</span>
             <select
@@ -330,29 +361,24 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
             </select>
           </div>
 
-          {/* Search Input */}
-          <div className="lg:col-span-4 flex items-center gap-1.5 relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 text-[#686c7d]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Поиск артиста, трека, альбома..."
-              className="w-full pl-8 pr-7 py-1.5 bg-[#181922] border border-[#2e3142] focus:border-[#39C5BB] rounded text-xs text-white outline-none"
-            />
-            {searchQuery && (
+          {/* Active Search Badge from Header */}
+          {searchQuery && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#39C5BB]/10 border border-[#39C5BB]/30 rounded text-xs text-[#39C5BB]">
+              <Search className="w-3.5 h-3.5" />
+              <span>Поиск в шапке: «{searchQuery}»</span>
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
-                className="absolute right-2 p-0.5 text-[#6b6f80] hover:text-white cursor-pointer"
+                className="ml-1 p-0.5 hover:text-white cursor-pointer"
+                title="Сбросить поиск"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3 h-3" />
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Quick Selection Buttons */}
-          <div className="lg:col-span-3 flex items-center justify-end gap-1.5">
+          <div className="flex items-center gap-1.5 ml-auto">
             <button
               type="button"
               onClick={handleSelectOnlyFiltered}
@@ -431,9 +457,9 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
         </div>
       </div>
 
-      {/* Main Workspace: Candidate Track Selection or Preview Table */}
+      {/* Main Workspace: Virtualized Candidate Tracks or Virtualized Preview Table */}
       {previewItems.length === 0 ? (
-        /* View 1: Candidate Tracks Selection List */
+        /* View 1: Virtualized Candidate Tracks Selection List */
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="px-4 py-2 bg-[#1b1c26] border-b border-[#282a37] flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
@@ -463,7 +489,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3">
+          <div ref={candidatesScrollRef} className="flex-1 overflow-y-auto p-3">
             {filteredCandidates.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-[#686c7d] space-y-2">
                 <Search className="w-10 h-10 opacity-30 text-[#39C5BB]" />
@@ -479,7 +505,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                 </button>
               </div>
             ) : (
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full text-left text-xs border-collapse table-fixed">
                 <thead className="sticky top-0 bg-[#1e2027] text-[#8E92A2] font-medium border-b border-[#2b2d37] z-10 select-none">
                   <tr>
                     <th className="py-2 px-2 w-9 text-center">
@@ -502,15 +528,23 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                         )}
                       </button>
                     </th>
-                    <th className="py-2 px-3">Исполнитель</th>
-                    <th className="py-2 px-3">Название</th>
-                    <th className="py-2 px-3">Альбом</th>
-                    <th className="py-2 px-3">Путь к файлу</th>
+                    <th className="py-2 px-3 w-1/4">Исполнитель</th>
+                    <th className="py-2 px-3 w-1/3">Название</th>
+                    <th className="py-2 px-3 w-1/4">Альбом</th>
+                    <th className="py-2 px-3 w-1/3">Путь к файлу</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#1e202a]">
-                  {filteredCandidates.map((track) => {
+                  {candPaddingTop > 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ height: `${candPaddingTop}px`, padding: 0 }} />
+                    </tr>
+                  )}
+                  {candVirtualItems.map((virtualRow) => {
+                    const track = filteredCandidates[virtualRow.index];
+                    if (!track) return null;
                     const isChecked = selectedTrackIds.has(track.id);
+
                     return (
                       <tr
                         key={track.id}
@@ -518,9 +552,10 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                         className={`cursor-pointer transition-colors ${
                           isChecked ? 'bg-[#39C5BB]/15 text-white font-medium' : 'hover:bg-[#1c1d27] text-[#D0D4E4]'
                         }`}
+                        style={{ height: '36px' }}
                       >
                         <td
-                          className="py-2 px-2 text-center"
+                          className="py-1 px-2 text-center"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleToggleTrack(track.id);
@@ -534,28 +569,33 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                             )}
                           </button>
                         </td>
-                        <td className="py-2 px-3 font-semibold text-[#39C5BB] truncate max-w-[160px]">
+                        <td className="py-1 px-3 font-semibold text-[#39C5BB] truncate">
                           {track.metadata.artist || '—'}
                         </td>
-                        <td className="py-2 px-3 truncate max-w-[200px]">
+                        <td className="py-1 px-3 truncate">
                           {track.metadata.title || track.file_name}
                         </td>
-                        <td className="py-2 px-3 truncate max-w-[160px] text-[#8E92A2]">
+                        <td className="py-1 px-3 truncate text-[#8E92A2]">
                           {track.metadata.album || '—'}
                         </td>
-                        <td className="py-2 px-3 truncate font-mono text-[10px] text-[#6b7082]">
+                        <td className="py-1 px-3 truncate font-mono text-[10px] text-[#6b7082]">
                           {track.file_path}
                         </td>
                       </tr>
                     );
                   })}
+                  {candPaddingBottom > 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ height: `${candPaddingBottom}px`, padding: 0 }} />
+                    </tr>
+                  )}
                 </tbody>
               </table>
             )}
           </div>
         </div>
       ) : (
-        /* View 2: Generated Preview Table */
+        /* View 2: Virtualized Preview Table */
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Summary / Filter & Move Bar */}
           <div className="px-4 py-2 bg-[#1b1c26] border-b border-[#282a37] flex items-center justify-between text-xs">
@@ -612,8 +652,8 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
             </button>
           </div>
 
-          <div className="flex-1 overflow-auto p-3">
-            <table className="w-full text-left text-xs border-collapse">
+          <div ref={previewScrollRef} className="flex-1 overflow-auto p-3">
+            <table className="w-full text-left text-xs border-collapse table-fixed">
               <thead className="sticky top-0 bg-[#1e2027] text-[#8E92A2] font-medium border-b border-[#2b2d37] z-10 select-none">
                 <tr className="text-[11px] uppercase tracking-wider">
                   <th className="py-2 px-2 w-9 text-center">
@@ -632,18 +672,27 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e202a]">
-                {filteredPreview.map((item, idx) => {
+                {prevPaddingTop > 0 && (
+                  <tr>
+                    <td colSpan={4} style={{ height: `${prevPaddingTop}px`, padding: 0 }} />
+                  </tr>
+                )}
+                {prevVirtualItems.map((virtualRow) => {
+                  const item = filteredPreview[virtualRow.index];
+                  if (!item) return null;
                   const isChecked = checkedPreviewPaths.has(item.original_path);
+
                   return (
                     <tr
-                      key={idx}
+                      key={item.original_path}
                       onClick={() => handleTogglePreviewItem(item.original_path)}
                       className={`cursor-pointer transition-colors ${
                         isChecked ? 'bg-[#1f212c]' : 'opacity-60 hover:opacity-100 hover:bg-[#1a1b24]'
                       }`}
+                      style={{ height: '40px' }}
                     >
                       <td
-                        className="py-2 px-2 text-center"
+                        className="py-1 px-2 text-center"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleTogglePreviewItem(item.original_path);
@@ -658,7 +707,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                         </button>
                       </td>
 
-                      <td className="py-2 px-3">
+                      <td className="py-1 px-3">
                         <div className="font-medium text-white truncate" title={item.file_name}>
                           {item.file_name}
                         </div>
@@ -667,7 +716,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                         </div>
                       </td>
 
-                      <td className="py-2 px-3">
+                      <td className="py-1 px-3">
                         <div className="flex items-center gap-1.5 font-mono text-[#39C5BB] truncate" title={item.relative_destination}>
                           <ArrowRight className="w-3 h-3 shrink-0 text-[#686c7d]" />
                           <span className="truncate">{item.relative_destination}</span>
@@ -677,7 +726,7 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                         </div>
                       </td>
 
-                      <td className="py-2 px-3 text-center">
+                      <td className="py-1 px-3 text-center">
                         {item.status === 'ready' && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-[#39C5BB]/15 text-[#39C5BB] border border-[#39C5BB]/30">
                             <CheckCircle2 className="w-3 h-3" />
@@ -705,6 +754,11 @@ export const OrganizerTab: React.FC<OrganizerTabProps> = ({
                     </tr>
                   );
                 })}
+                {prevPaddingBottom > 0 && (
+                  <tr>
+                    <td colSpan={4} style={{ height: `${prevPaddingBottom}px`, padding: 0 }} />
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

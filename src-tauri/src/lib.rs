@@ -6,10 +6,28 @@ use liertags_core::server::{start_import_server, DEFAULT_SERVER_PORT};
 use tauri::Emitter;
 use tokio::sync::broadcast;
 
+#[cfg(target_os = "windows")]
+fn trim_process_memory() {
+    unsafe {
+        #[link(name = "psapi")]
+        unsafe extern "system" {
+            fn EmptyWorkingSet(hProcess: isize) -> i32;
+            fn GetCurrentProcess() -> isize;
+        }
+        EmptyWorkingSet(GetCurrentProcess());
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Focused(false) = event {
+                #[cfg(target_os = "windows")]
+                trim_process_memory();
+            }
+        })
         .setup(|app| {
             let app_handle = app.handle().clone();
 
@@ -36,6 +54,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            get_tracks_paged,
             scan_folder,
             open_files,
             handle_dropped_paths,

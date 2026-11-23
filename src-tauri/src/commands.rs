@@ -5,10 +5,37 @@ use liertags_core::api;
 use serde::Serialize;
 
 #[derive(Serialize)]
+pub struct PagedTracksResult {
+    pub tracks: Vec<Track>,
+    pub total: usize,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+#[derive(Serialize)]
 pub struct DropResult {
     pub mode: String, // "folder" or "files"
     pub folder_path: Option<String>,
     pub tracks: Vec<Track>,
+}
+
+#[tauri::command]
+pub async fn get_tracks_paged(
+    folder_path: Option<String>,
+    search: Option<String>,
+    offset: usize,
+    limit: usize,
+) -> Result<PagedTracksResult, String> {
+    let cache = liertags_core::cache::LibraryCache::new().map_err(|e| e.to_string())?;
+    let (tracks, total) = cache
+        .get_tracks_paged(folder_path.as_deref(), search.as_deref(), offset, limit)
+        .map_err(|e| e.to_string())?;
+    Ok(PagedTracksResult {
+        tracks,
+        total,
+        offset,
+        limit,
+    })
 }
 
 #[tauri::command]

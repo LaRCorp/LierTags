@@ -133,3 +133,10 @@ export interface DropResult {
   folder_path?: string;
   tracks: Track[];
 }
+
+export interface PagedTracksResult {
+  tracks: Track[];
+  total: number;
+  offset: number;
+  limit: number;
+}

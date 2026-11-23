@@ -220,10 +220,10 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
           </div>
         </div>
 
-        {/* Filters: Artist + Search Query */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-center bg-[#13141a] p-2.5 rounded-md border border-[#2a2d3c]">
+        {/* Filter Bar: Artist Selector + Global Search Indicator */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 bg-[#13141a] p-2.5 rounded-md border border-[#2a2d3c]">
           {/* Artist Filter Dropdown */}
-          <div className="lg:col-span-5 flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-[280px] flex-1 max-w-md">
             <UserCheck className="w-4 h-4 text-[#39C5BB] shrink-0" />
             <span className="text-xs text-[#9EA2B0] shrink-0">Исполнитель:</span>
             <select
@@ -240,26 +240,21 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
             </select>
           </div>
 
-          {/* Search Input */}
-          <div className="lg:col-span-7 flex items-center gap-1.5 relative">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 text-[#686c7d]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Фильтр по названию, артисту, имени файла..."
-              className="w-full pl-8 pr-7 py-1.5 bg-[#181922] border border-[#2e3142] focus:border-[#39C5BB] rounded text-xs text-white outline-none"
-            />
-            {searchQuery && (
+          {/* Active Search Badge from Header */}
+          {searchQuery && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#39C5BB]/10 border border-[#39C5BB]/30 rounded text-xs text-[#39C5BB]">
+              <Search className="w-3.5 h-3.5" />
+              <span>Поиск в шапке: «{searchQuery}»</span>
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
-                className="absolute right-2 p-0.5 text-[#6b6f80] hover:text-white cursor-pointer"
+                className="ml-1 p-0.5 hover:text-white cursor-pointer"
+                title="Сбросить поиск"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3 h-3" />
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Mode Selector & Scan Button */}

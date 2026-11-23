@@ -314,6 +314,138 @@ impl LibraryCache {
         tx.commit()?;
         Ok(())
     }
+
+    /// Paginated query directly from SQLite cache with optional folder and search filtering
+    pub fn get_tracks_paged(
+        &self,
+        folder_prefix: Option<&str>,
+        search_query: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<(Vec<Track>, usize)> {
+        let conn = self.connect()?;
+
+        let mut where_conditions = Vec::new();
+        let mut query_params: Vec<rusqlite::types::Value> = Vec::new();
+
+        if let Some(folder) = folder_prefix {
+            if !folder.is_empty() {
+                where_conditions.push("file_path LIKE ?".to_string());
+                query_params.push(format!("{}%", folder).into());
+            }
+        }
+
+        if let Some(query) = search_query {
+            let q = query.trim();
+            if !q.is_empty() {
+                let pat = format!("%{}%", q);
+                where_conditions.push(
+                    "(title LIKE ? OR artist LIKE ? OR album LIKE ? OR file_name LIKE ? OR file_path LIKE ?)"
+                        .to_string(),
+                );
+                query_params.push(pat.clone().into());
+                query_params.push(pat.clone().into());
+                query_params.push(pat.clone().into());
+                query_params.push(pat.clone().into());
+                query_params.push(pat.into());
+            }
+        }
+
+        let where_clause = if where_conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", where_conditions.join(" AND "))
+        };
+
+        // 1. Total count query
+        let count_sql = format!("SELECT COUNT(*) FROM track_cache {}", where_clause);
+        let mut count_stmt = conn.prepare(&count_sql)?;
+        let total_count: i64 = count_stmt.query_row(
+            rusqlite::params_from_iter(query_params.iter()),
+            |row| row.get(0),
+        )?;
+
+        // 2. Paginated rows query
+        let rows_sql = format!(
+            "SELECT file_path, file_name, file_size, mtime, extension,
+                    title, artist, album, year, genre, track_number, track_total, comment,
+                    has_artwork, artwork_mime, duration_seconds, bitrate_kbps, sample_rate_hz, channels
+             FROM track_cache
+             {}
+             ORDER BY file_name COLLATE NOCASE ASC
+             LIMIT ? OFFSET ?",
+            where_clause
+        );
+
+        let mut paginated_params = query_params;
+        paginated_params.push((limit as i64).into());
+        paginated_params.push((offset as i64).into());
+
+        let mut stmt = conn.prepare(&rows_sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(paginated_params.iter()), |row| {
+            let file_path: String = row.get(0)?;
+            let file_name: String = row.get(1)?;
+            let file_size: u64 = row.get::<_, i64>(2)? as u64;
+            let extension: String = row.get(4)?;
+
+            let title: Option<String> = row.get(5)?;
+            let artist: Option<String> = row.get(6)?;
+            let album: Option<String> = row.get(7)?;
+            let year: Option<u32> = row.get(8)?;
+            let genre: Option<String> = row.get(9)?;
+            let track_number: Option<u32> = row.get(10)?;
+            let track_total: Option<u32> = row.get(11)?;
+            let comment: Option<String> = row.get(12)?;
+            let has_artwork: bool = row.get::<_, i64>(13)? != 0;
+            let artwork_mime: Option<String> = row.get(14)?;
+
+            let duration_seconds: u64 = row.get::<_, i64>(15)? as u64;
+            let bitrate_kbps: Option<u32> = row.get(16)?;
+            let sample_rate_hz: Option<u32> = row.get(17)?;
+            let channels: Option<u8> = row.get(18)?;
+
+            let id = format!("{:x}", crate::tags::md5_hash(file_path.as_bytes()));
+
+            Ok(Track {
+                id,
+                file_path,
+                file_name,
+                file_size_bytes: file_size,
+                extension,
+                metadata: TrackMetadata {
+                    title,
+                    artist,
+                    album,
+                    year,
+                    genre,
+                    track_number,
+                    track_total,
+                    comment,
+                    lyrics: None,
+                    is_synced_lyrics: false,
+                    has_artwork,
+                    artwork_mime,
+                    artwork_base64: None,
+                },
+                properties: AudioProperties {
+                    duration_seconds,
+                    bitrate_kbps,
+                    sample_rate_hz,
+                    channels,
+                },
+                dirty: false,
+            })
+        })?;
+
+        let mut tracks = Vec::new();
+        for r in rows {
+            if let Ok(track) = r {
+                tracks.push(track);
+            }
+        }
+
+        Ok((tracks, total_count as usize))
+    }
 }
 
 pub fn get_file_mtime_secs(meta: &fs::Metadata) -> u64 {
