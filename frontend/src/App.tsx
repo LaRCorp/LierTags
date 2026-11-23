@@ -59,25 +59,27 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // 2. Lazy-load full artwork for currently active track on demand
+  // 2. Load fresh full track details (artwork + lyrics) for active track on select
   useEffect(() => {
-    if (!activeTrack) return;
-    if (activeTrack.metadata.has_artwork && !activeTrack.metadata.artwork_base64) {
-      invoke<string | null>('read_track_artwork', { filePath: activeTrack.file_path })
-        .then((artUri) => {
-          if (artUri) {
-            setTracks((prev) =>
-              prev.map((t) =>
-                t.id === activeTrack.id
-                  ? { ...t, metadata: { ...t.metadata, artwork_base64: artUri } }
-                  : t
-              )
-            );
-          }
-        })
-        .catch((err) => console.warn('Failed to lazy load artwork:', err));
-    }
-  }, [selectedTrackId, activeTrack]);
+    if (!selectedTrackId) return;
+    const current = tracks.find((t) => t.id === selectedTrackId);
+    if (!current) return;
+
+    invoke<Track>('read_track', { filePath: current.file_path })
+      .then((fresh) => {
+        setTracks((prev) =>
+          prev.map((t) =>
+            t.id === fresh.id
+              ? {
+                  ...fresh,
+                  dirty: t.dirty,
+                }
+              : t
+          )
+        );
+      })
+      .catch((err) => console.warn('Failed to load track details on select:', err));
+  }, [selectedTrackId]);
 
   // 3. Listen for LierEX-Q import events on port 8766
   useEffect(() => {
@@ -159,8 +161,9 @@ export const App: React.FC = () => {
         const hasArtistChanged = fresh.metadata.artist !== current.metadata.artist;
         const hasAlbumChanged = fresh.metadata.album !== current.metadata.album;
         const hasYearChanged = fresh.metadata.year !== current.metadata.year;
+        const hasLyricsChanged = fresh.metadata.lyrics !== current.metadata.lyrics;
 
-        if (hasArtworkChanged || hasTitleChanged || hasArtistChanged || hasAlbumChanged || hasYearChanged) {
+        if (hasArtworkChanged || hasTitleChanged || hasArtistChanged || hasAlbumChanged || hasYearChanged || hasLyricsChanged) {
           console.log('Passive reload: external change detected on track', fresh.file_name);
           setTracks((prev) => prev.map((t) => (t.id === fresh.id ? { ...fresh, dirty: false } : t)));
         }

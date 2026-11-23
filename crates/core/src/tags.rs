@@ -66,7 +66,7 @@ pub fn read_track_summary(path: &Path) -> Result<Track> {
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
 
-    let (lyrics, is_synced_lyrics) = crate::lyrics::read_lyrics_from_path(path);
+    let (lyrics, is_synced_lyrics) = crate::lyrics::read_lyrics_from_tagged_file(&tagged_file, path);
 
     let metadata = if let Some(tag) = primary_or_first {
         let picture = tag

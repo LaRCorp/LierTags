@@ -59,6 +59,8 @@ impl LibraryCache {
                 track_number INTEGER,
                 track_total INTEGER,
                 comment TEXT,
+                lyrics TEXT,
+                is_synced_lyrics INTEGER DEFAULT 0,
                 has_artwork INTEGER NOT NULL,
                 artwork_mime TEXT,
                 duration_seconds INTEGER NOT NULL,
@@ -68,6 +70,11 @@ impl LibraryCache {
             );
             CREATE INDEX IF NOT EXISTS idx_track_cache_folder ON track_cache(file_path);",
         )?;
+
+        // Safe migrations for existing databases
+        let _ = conn.execute("ALTER TABLE track_cache ADD COLUMN lyrics TEXT", []);
+        let _ = conn.execute("ALTER TABLE track_cache ADD COLUMN is_synced_lyrics INTEGER DEFAULT 0", []);
+
         Ok(())
     }
 
@@ -80,6 +87,7 @@ impl LibraryCache {
         let mut stmt = match conn.prepare(
             "SELECT file_path, file_name, file_size, mtime, extension,
                     title, artist, album, year, genre, track_number, track_total, comment,
+                    lyrics, is_synced_lyrics,
                     has_artwork, artwork_mime, duration_seconds, bitrate_kbps, sample_rate_hz, channels
              FROM track_cache
              WHERE file_path LIKE ?1",
@@ -103,13 +111,15 @@ impl LibraryCache {
             let track_number: Option<u32> = row.get(10)?;
             let track_total: Option<u32> = row.get(11)?;
             let comment: Option<String> = row.get(12)?;
-            let has_artwork: bool = row.get::<_, i64>(13)? != 0;
-            let artwork_mime: Option<String> = row.get(14)?;
+            let lyrics: Option<String> = row.get(13)?;
+            let is_synced_lyrics: bool = row.get::<_, i64>(14).unwrap_or(0) != 0;
+            let has_artwork: bool = row.get::<_, i64>(15)? != 0;
+            let artwork_mime: Option<String> = row.get(16)?;
 
-            let duration_seconds: u64 = row.get::<_, i64>(15)? as u64;
-            let bitrate_kbps: Option<u32> = row.get(16)?;
-            let sample_rate_hz: Option<u32> = row.get(17)?;
-            let channels: Option<u8> = row.get(18)?;
+            let duration_seconds: u64 = row.get::<_, i64>(17)? as u64;
+            let bitrate_kbps: Option<u32> = row.get(18)?;
+            let sample_rate_hz: Option<u32> = row.get(19)?;
+            let channels: Option<u8> = row.get(20)?;
 
             let id = format!("{:x}", crate::tags::md5_hash(file_path.as_bytes()));
 
@@ -128,8 +138,8 @@ impl LibraryCache {
                     track_number,
                     track_total,
                     comment,
-                    lyrics: None,
-                    is_synced_lyrics: false,
+                    lyrics,
+                    is_synced_lyrics,
                     has_artwork,
                     artwork_mime,
                     artwork_base64: None, // lazy loaded
@@ -161,6 +171,7 @@ impl LibraryCache {
         let mut stmt = conn.prepare(
             "SELECT file_path, file_name, file_size, mtime, extension,
                     title, artist, album, year, genre, track_number, track_total, comment,
+                    lyrics, is_synced_lyrics,
                     has_artwork, artwork_mime, duration_seconds, bitrate_kbps, sample_rate_hz, channels
              FROM track_cache
              WHERE file_path = ?1 AND file_size = ?2 AND mtime = ?3",
@@ -179,13 +190,15 @@ impl LibraryCache {
             let track_number: Option<u32> = row.get(10)?;
             let track_total: Option<u32> = row.get(11)?;
             let comment: Option<String> = row.get(12)?;
-            let has_artwork: bool = row.get::<_, i64>(13)? != 0;
-            let artwork_mime: Option<String> = row.get(14)?;
+            let lyrics: Option<String> = row.get(13)?;
+            let is_synced_lyrics: bool = row.get::<_, i64>(14).unwrap_or(0) != 0;
+            let has_artwork: bool = row.get::<_, i64>(15)? != 0;
+            let artwork_mime: Option<String> = row.get(16)?;
 
-            let duration_seconds: u64 = row.get::<_, i64>(15)? as u64;
-            let bitrate_kbps: Option<u32> = row.get(16)?;
-            let sample_rate_hz: Option<u32> = row.get(17)?;
-            let channels: Option<u8> = row.get(18)?;
+            let duration_seconds: u64 = row.get::<_, i64>(17)? as u64;
+            let bitrate_kbps: Option<u32> = row.get(18)?;
+            let sample_rate_hz: Option<u32> = row.get(19)?;
+            let channels: Option<u8> = row.get(20)?;
 
             let id = format!("{:x}", crate::tags::md5_hash(file_path.as_bytes()));
 
@@ -204,8 +217,8 @@ impl LibraryCache {
                     track_number,
                     track_total,
                     comment,
-                    lyrics: None,
-                    is_synced_lyrics: false,
+                    lyrics,
+                    is_synced_lyrics,
                     has_artwork,
                     artwork_mime,
                     artwork_base64: None,
@@ -237,8 +250,9 @@ impl LibraryCache {
                 "INSERT INTO track_cache (
                     file_path, file_name, file_size, mtime, extension,
                     title, artist, album, year, genre, track_number, track_total, comment,
+                    lyrics, is_synced_lyrics,
                     has_artwork, artwork_mime, duration_seconds, bitrate_kbps, sample_rate_hz, channels
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
                 ON CONFLICT(file_path) DO UPDATE SET
                     file_name = excluded.file_name,
                     file_size = excluded.file_size,
@@ -252,6 +266,8 @@ impl LibraryCache {
                     track_number = excluded.track_number,
                     track_total = excluded.track_total,
                     comment = excluded.comment,
+                    lyrics = excluded.lyrics,
+                    is_synced_lyrics = excluded.is_synced_lyrics,
                     has_artwork = excluded.has_artwork,
                     artwork_mime = excluded.artwork_mime,
                     duration_seconds = excluded.duration_seconds,
@@ -275,7 +291,9 @@ impl LibraryCache {
                     track.metadata.track_number,
                     track.metadata.track_total,
                     track.metadata.comment,
-                    if track.metadata.has_artwork { 1 } else { 0 },
+                    track.metadata.lyrics,
+                    if track.metadata.is_synced_lyrics { 1i64 } else { 0i64 },
+                    if track.metadata.has_artwork { 1i64 } else { 0i64 },
                     track.metadata.artwork_mime,
                     track.properties.duration_seconds as i64,
                     track.properties.bitrate_kbps,
@@ -369,6 +387,7 @@ impl LibraryCache {
         let rows_sql = format!(
             "SELECT file_path, file_name, file_size, mtime, extension,
                     title, artist, album, year, genre, track_number, track_total, comment,
+                    lyrics, is_synced_lyrics,
                     has_artwork, artwork_mime, duration_seconds, bitrate_kbps, sample_rate_hz, channels
              FROM track_cache
              {}
@@ -396,13 +415,15 @@ impl LibraryCache {
             let track_number: Option<u32> = row.get(10)?;
             let track_total: Option<u32> = row.get(11)?;
             let comment: Option<String> = row.get(12)?;
-            let has_artwork: bool = row.get::<_, i64>(13)? != 0;
-            let artwork_mime: Option<String> = row.get(14)?;
+            let lyrics: Option<String> = row.get(13)?;
+            let is_synced_lyrics: bool = row.get::<_, i64>(14).unwrap_or(0) != 0;
+            let has_artwork: bool = row.get::<_, i64>(15)? != 0;
+            let artwork_mime: Option<String> = row.get(16)?;
 
-            let duration_seconds: u64 = row.get::<_, i64>(15)? as u64;
-            let bitrate_kbps: Option<u32> = row.get(16)?;
-            let sample_rate_hz: Option<u32> = row.get(17)?;
-            let channels: Option<u8> = row.get(18)?;
+            let duration_seconds: u64 = row.get::<_, i64>(17)? as u64;
+            let bitrate_kbps: Option<u32> = row.get(18)?;
+            let sample_rate_hz: Option<u32> = row.get(19)?;
+            let channels: Option<u8> = row.get(20)?;
 
             let id = format!("{:x}", crate::tags::md5_hash(file_path.as_bytes()));
 
@@ -421,8 +442,8 @@ impl LibraryCache {
                     track_number,
                     track_total,
                     comment,
-                    lyrics: None,
-                    is_synced_lyrics: false,
+                    lyrics,
+                    is_synced_lyrics,
                     has_artwork,
                     artwork_mime,
                     artwork_base64: None,
