@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Track, DuplicateGroup, DuplicateMode, DeleteSummary } from '../types';
 import {
@@ -12,26 +12,74 @@ import {
   Sparkles,
   Music,
   CheckCircle2,
+  X,
+  UserCheck,
 } from 'lucide-react';
 
 interface DuplicatesTabProps {
   tracks: Track[];
   currentFolder: string | null;
   onRefreshLibrary: () => Promise<void>;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
 }
 
 export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
   tracks,
   currentFolder,
   onRefreshLibrary,
+  searchQuery,
+  onSearchChange,
 }) => {
   const [mode, setMode] = useState<DuplicateMode>('size_duration');
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
+  const [selectedArtist, setSelectedArtist] = useState<string>('all');
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteResult, setDeleteResult] = useState<DeleteSummary | null>(null);
+
+  // Extract unique artists list
+  const artistList = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of tracks) {
+      const art = t.metadata.artist?.trim() || 'Без исполнителя';
+      map.set(art, (map.get(art) || 0) + 1);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [tracks]);
+
+  // Candidate tracks for duplicate scanning (allows scanning only filtered artist/query!)
+  const candidateTracks = useMemo(() => {
+    if (selectedArtist === 'all' && !searchQuery.trim()) {
+      return tracks;
+    }
+    return tracks.filter((t) => {
+      if (selectedArtist !== 'all') {
+        const art = t.metadata.artist?.trim() || 'Без исполнителя';
+        if (art.toLowerCase() !== selectedArtist.toLowerCase()) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const title = (t.metadata.title || '').toLowerCase();
+        const artist = (t.metadata.artist || '').toLowerCase();
+        const album = (t.metadata.album || '').toLowerCase();
+        const genre = (t.metadata.genre || '').toLowerCase();
+        const fileName = (t.file_name || '').toLowerCase();
+        const filePath = (t.file_path || '').toLowerCase();
+        const match =
+          title.includes(q) ||
+          artist.includes(q) ||
+          album.includes(q) ||
+          genre.includes(q) ||
+          fileName.includes(q) ||
+          filePath.includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [tracks, selectedArtist, searchQuery]);
 
   const handleScanDuplicates = async () => {
     setIsScanning(true);
@@ -41,7 +89,7 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
       const groups = await invoke<DuplicateGroup[]>('find_duplicates', {
         folderPath: currentFolder || undefined,
         mode,
-        tracks: tracks.length > 0 ? tracks : undefined,
+        tracks: candidateTracks.length > 0 ? candidateTracks : undefined,
       });
       setDuplicateGroups(groups);
     } catch (err) {
@@ -51,6 +99,26 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
       setIsScanning(false);
     }
   };
+
+  // Filter already-found duplicate groups by search query and artist
+  const filteredGroups = useMemo(() => {
+    return duplicateGroups.filter((group) => {
+      if (selectedArtist !== 'all') {
+        const art = group.artist?.trim() || '';
+        if (art.toLowerCase() !== selectedArtist.toLowerCase()) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const titleMatch = (group.title || '').toLowerCase().includes(q);
+        const artistMatch = (group.artist || '').toLowerCase().includes(q);
+        const fileMatch = group.files.some(
+          (f) => f.file_name.toLowerCase().includes(q) || f.file_path.toLowerCase().includes(q)
+        );
+        if (!titleMatch && !artistMatch && !fileMatch) return false;
+      }
+      return true;
+    });
+  }, [duplicateGroups, selectedArtist, searchQuery]);
 
   // Toggle single file selection
   const toggleFileSelection = (filePath: string) => {
@@ -68,7 +136,7 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
   // Select all lower-quality duplicates (keep index 0 which has best bitrate/size)
   const handleSelectLowerQuality = () => {
     const toSelect = new Set<string>();
-    for (const group of duplicateGroups) {
+    for (const group of filteredGroups) {
       // Index 0 is best quality; select items from index 1 onwards
       for (let i = 1; i < group.files.length; i++) {
         toSelect.add(group.files[i].file_path);
@@ -83,7 +151,7 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
   };
 
   // Calculate total bytes selected
-  const totalSelectedBytes = duplicateGroups
+  const totalSelectedBytes = filteredGroups
     .flatMap((g) => g.files)
     .filter((f) => selectedPaths.has(f.file_path))
     .reduce((acc, f) => acc + f.file_size_bytes, 0);
@@ -144,7 +212,53 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
             </h2>
           </div>
           <div className="text-xs text-[#828698]">
-            Файлов для анализа: <span className="font-semibold text-white">{tracks.length}</span>
+            Файлов для анализа:{' '}
+            <span className="font-semibold text-white">
+              {candidateTracks.length}
+              {candidateTracks.length !== tracks.length ? ` (из ${tracks.length})` : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* Filters: Artist + Search Query */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-center bg-[#13141a] p-2.5 rounded-md border border-[#2a2d3c]">
+          {/* Artist Filter Dropdown */}
+          <div className="lg:col-span-5 flex items-center gap-2">
+            <UserCheck className="w-4 h-4 text-[#39C5BB] shrink-0" />
+            <span className="text-xs text-[#9EA2B0] shrink-0">Исполнитель:</span>
+            <select
+              value={selectedArtist}
+              onChange={(e) => setSelectedArtist(e.target.value)}
+              className="flex-1 px-2.5 py-1.5 bg-[#181922] border border-[#2e3142] focus:border-[#39C5BB] rounded text-xs text-white outline-none cursor-pointer"
+            >
+              <option value="all">Все исполнители ({artistList.length})</option>
+              {artistList.map(([art, count]) => (
+                <option key={art} value={art}>
+                  {art} ({count} {count === 1 ? 'трек' : 'треков'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Search Input */}
+          <div className="lg:col-span-7 flex items-center gap-1.5 relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 text-[#686c7d]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Фильтр по названию, артисту, имени файла..."
+              className="w-full pl-8 pr-7 py-1.5 bg-[#181922] border border-[#2e3142] focus:border-[#39C5BB] rounded text-xs text-white outline-none"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => onSearchChange('')}
+                className="absolute right-2 p-0.5 text-[#6b6f80] hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -194,16 +308,22 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
 
           <button
             onClick={handleScanDuplicates}
-            disabled={isScanning || tracks.length === 0}
+            disabled={isScanning || candidateTracks.length === 0}
             className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded bg-[#39C5BB] hover:bg-[#45ded4] active:bg-[#2fa89f] text-black transition-colors shadow-md cursor-pointer disabled:opacity-50"
           >
             {isScanning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-            <span>{isScanning ? 'Сканирование...' : 'Сканировать дубликаты'}</span>
+            <span>
+              {isScanning
+                ? 'Сканирование...'
+                : candidateTracks.length !== tracks.length
+                ? `Сканировать найденные (${candidateTracks.length})`
+                : 'Сканировать дубликаты'}
+            </span>
           </button>
         </div>
 
         {/* Quick Selection Helpers (visible when duplicates are present) */}
-        {duplicateGroups.length > 0 && (
+        {filteredGroups.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#262835]">
             <div className="flex items-center gap-2">
               <span className="text-xs text-[#828698]">Быстрый выбор:</span>
@@ -249,18 +369,22 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
 
       {/* Main Groups List Body */}
       <div className="flex-1 overflow-auto p-4 space-y-3">
-        {duplicateGroups.length === 0 ? (
+        {filteredGroups.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-[#686c7d] space-y-2">
             <Copy className="w-12 h-12 opacity-30 text-[#39C5BB]" />
             <p className="text-sm">
-              {isScanning ? 'Выполняется анализ библиотеки...' : 'Дубликаты не найдены или поиск еще не запускался'}
+              {isScanning
+                ? 'Выполняется анализ библиотеки...'
+                : duplicateGroups.length > 0
+                ? 'Нет дубликатов, соответствующих текущему поиску или выбранному артисту'
+                : 'Дубликаты не найдены или поиск еще не запускался'}
             </p>
             <p className="text-xs text-[#525565]">
               Выберите режим и нажмите «Сканировать дубликаты»
             </p>
           </div>
         ) : (
-          duplicateGroups.map((group) => {
+          filteredGroups.map((group) => {
             const groupFileCount = group.files.length;
 
             return (
@@ -374,7 +498,7 @@ export const DuplicatesTab: React.FC<DuplicatesTabProps> = ({
             </div>
 
             <p className="text-xs text-[#C8CBD8] leading-relaxed">
-              Выбранные файлы будут полностью удалены с диска. Если рядом находятся синхронизированные тексты (.lrc), они также будут удалены.
+              Выбранные файлы будут полностью удалены с диска. Синхронизированные тексты (.lrc) будут удалены автоматически.
             </p>
 
             {/* List of files to delete */}

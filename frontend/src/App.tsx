@@ -20,6 +20,7 @@ import {
   Music,
   FolderTree,
   Copy,
+  X,
 } from 'lucide-react';
 
 const LAST_FOLDER_KEY = 'liertags_last_folder';
@@ -35,6 +36,7 @@ export const App: React.FC = () => {
   const [importModalPayload, setImportModalPayload] = useState<ImportPayload | null>(null);
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'library' | 'organizer' | 'duplicates'>('library');
+  const [checkedTrackIds, setCheckedTrackIds] = useState<Set<string>>(new Set());
 
   // Active track derived from selected ID
   const activeTrack = tracks.find((t) => t.id === selectedTrackId) || null;
@@ -367,6 +369,36 @@ export const App: React.FC = () => {
     setImportModalPayload(null);
   };
 
+  const handleToggleCheckTrack = (trackId: string) => {
+    setCheckedTrackIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(trackId)) {
+        next.delete(trackId);
+      } else {
+        next.add(trackId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllFiltered = (filtered: Track[]) => {
+    const next = new Set(checkedTrackIds);
+    for (const t of filtered) {
+      next.add(t.id);
+    }
+    setCheckedTrackIds(next);
+  };
+
+  const handleClearChecked = () => {
+    setCheckedTrackIds(new Set());
+  };
+
+  const handleSendToOrganizer = (selectedTracks: Track[]) => {
+    const ids = new Set(selectedTracks.map((t) => t.id));
+    setCheckedTrackIds(ids);
+    setActiveTab('organizer');
+  };
+
   return (
     <div
       onDragOver={(e) => {
@@ -486,11 +518,21 @@ export const App: React.FC = () => {
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-2 text-[#686c7d]" />
             <input
               type="text"
-              placeholder="Поиск по названию, артисту, альбому..."
+              placeholder="Поиск по названию, артисту, альбому, пути..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 pr-3 py-1 text-xs bg-[#121317] border border-[#2e313e] focus:border-[#39C5BB] rounded-md text-white outline-none w-64 lg:w-80 transition-colors"
+              className="pl-8 pr-7 py-1 text-xs bg-[#121317] border border-[#2e313e] focus:border-[#39C5BB] rounded-md text-white outline-none w-64 lg:w-80 transition-colors"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-2 p-0.5 text-[#686c7d] hover:text-white cursor-pointer"
+                title="Очистить поиск"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
 
           {/* LierEX-Q local server indicator */}
@@ -511,6 +553,11 @@ export const App: React.FC = () => {
               selectedTrackId={selectedTrackId}
               onSelectTrack={(t) => setSelectedTrackId(t.id)}
               searchQuery={searchQuery}
+              checkedTrackIds={checkedTrackIds}
+              onToggleCheckTrack={handleToggleCheckTrack}
+              onSelectAllFiltered={handleSelectAllFiltered}
+              onClearChecked={handleClearChecked}
+              onSendToOrganizer={handleSendToOrganizer}
             />
             <EditPanel
               track={activeTrack}
@@ -528,6 +575,10 @@ export const App: React.FC = () => {
             tracks={tracks}
             currentFolder={currentFolder}
             onRefreshLibrary={handleRescanFolder}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            selectedTrackIds={checkedTrackIds}
+            onUpdateSelectedTrackIds={setCheckedTrackIds}
           />
         )}
 
@@ -536,6 +587,8 @@ export const App: React.FC = () => {
             tracks={tracks}
             currentFolder={currentFolder}
             onRefreshLibrary={handleRescanFolder}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
           />
         )}
       </main>
