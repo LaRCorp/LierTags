@@ -181,16 +181,22 @@ export const EditPanel: React.FC<EditPanelProps> = ({
 
   const handleSaveClick = async () => {
     if (!formData.file_path) return;
+    const cleanTrim = (val?: string) => {
+      if (!val) return undefined;
+      const t = val.trim();
+      return t.length > 0 ? t : undefined;
+    };
+
     await onSave({
       file_path: formData.file_path,
-      title: formData.title || undefined,
-      artist: formData.artist || undefined,
-      album: formData.album || undefined,
+      title: cleanTrim(formData.title),
+      artist: cleanTrim(formData.artist),
+      album: cleanTrim(formData.album),
       year: formData.year ? Number(formData.year) : undefined,
-      genre: formData.genre || undefined,
+      genre: cleanTrim(formData.genre),
       track_number: formData.track_number ? Number(formData.track_number) : undefined,
       track_total: formData.track_total ? Number(formData.track_total) : undefined,
-      comment: formData.comment || undefined,
+      comment: cleanTrim(formData.comment),
       lyrics: formData.lyrics !== undefined ? formData.lyrics : undefined,
       save_lrc_file: saveLrcFile,
       new_artwork_base64: formData.new_artwork_base64,

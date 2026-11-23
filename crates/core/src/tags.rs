@@ -8,7 +8,7 @@ use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::items::Timestamp;
-use lofty::tag::{ItemKey, Tag};
+use lofty::tag::{ItemKey, Tag, TagType};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
@@ -78,15 +78,19 @@ pub fn read_track_summary(path: &Path) -> Result<Track> {
         let has_artwork = picture.is_some();
         let artwork_mime = picture.and_then(|p| p.mime_type()).map(|m| m.as_str().to_string());
 
+        let clean_str = |opt: Option<std::borrow::Cow<'_, str>>| {
+            opt.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        };
+
         TrackMetadata {
-            title: tag.title().map(|s| s.to_string()),
-            artist: tag.artist().map(|s| s.to_string()),
-            album: tag.album().map(|s| s.to_string()),
-            year: tag.date().map(|d| d.year as u32),
-            genre: tag.genre().map(|s| s.to_string()),
-            track_number: tag.track(),
-            track_total: tag.track_total(),
-            comment: tag.comment().map(|s| s.to_string()),
+            title: clean_str(tag.title()),
+            artist: clean_str(tag.artist()),
+            album: clean_str(tag.album()),
+            year: tag.date().map(|d| d.year as u32).filter(|&y| y > 0),
+            genre: clean_str(tag.genre()),
+            track_number: tag.track().filter(|&n| n > 0),
+            track_total: tag.track_total().filter(|&t| t > 0),
+            comment: clean_str(tag.comment()),
             lyrics,
             is_synced_lyrics,
             has_artwork,
@@ -279,112 +283,153 @@ pub fn save_track(payload: &SaveTrackPayload) -> Result<Track> {
         .read()
         .with_context(|| format!("Failed to read audio file: {}", path.display()))?;
 
-    let tag_type = tagged_file.primary_tag_type();
-    let tag = match tagged_file.tag_mut(tag_type) {
-        Some(t) => t,
-        None => {
-            let new_tag = Tag::new(tag_type);
-            tagged_file.insert_tag(new_tag);
-            tagged_file.tag_mut(tag_type).ok_or_else(|| anyhow!("Failed to create tag"))?
-        }
-    };
+    let clean_title = payload.title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let clean_artist = payload.artist.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let clean_album = payload.album.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let clean_genre = payload.genre.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let clean_comment = payload.comment.as_deref().map(str::trim).filter(|s| !s.is_empty());
 
-    // Update text metadata fields
-    if let Some(ref title) = payload.title {
-        tag.set_title(title.clone());
-    } else {
-        tag.remove_title();
-    }
-
-    if let Some(ref artist) = payload.artist {
-        tag.set_artist(artist.clone());
-    } else {
-        tag.remove_artist();
-    }
-
-    if let Some(ref album) = payload.album {
-        tag.set_album(album.clone());
-    } else {
-        tag.remove_album();
-    }
-
-    if let Some(year) = payload.year {
-        tag.set_date(Timestamp {
-            year: year as u16,
-            ..Default::default()
-        });
-    } else {
-        tag.remove_date();
-    }
-
-    if let Some(ref genre) = payload.genre {
-        tag.set_genre(genre.clone());
-    } else {
-        tag.remove_genre();
-    }
-
-    if let Some(num) = payload.track_number {
-        tag.set_track(num);
-    } else {
-        tag.remove_track();
-    }
-
-    if let Some(total) = payload.track_total {
-        tag.set_track_total(total);
-    } else {
-        tag.remove_track_total();
-    }
-
-    if let Some(ref comment) = payload.comment {
-        tag.set_comment(comment.clone());
-    } else {
-        tag.remove_comment();
-    }
-
-    // Lyrics management
-    if let Some(ref lyrics_text) = payload.lyrics {
-        let is_synced = crate::lyrics::is_synced_lrc(lyrics_text);
-        if lyrics_text.trim().is_empty() {
-            tag.remove_key(ItemKey::Lyrics);
-            tag.remove_key(ItemKey::UnsyncLyrics);
-            let lrc_path = path.with_extension("lrc");
-            if lrc_path.is_file() {
-                let _ = fs::remove_file(lrc_path);
-            }
-        } else {
-            tag.insert_text(ItemKey::Lyrics, lyrics_text.clone());
-            tag.insert_text(ItemKey::UnsyncLyrics, lyrics_text.clone());
-            if payload.save_lrc_file || is_synced {
-                let lrc_path = path.with_extension("lrc");
-                let _ = fs::write(lrc_path, lyrics_text);
-            }
-        }
-    }
-
-    // Artwork management
-    if payload.remove_artwork {
-        tag.remove_picture_type(PictureType::CoverFront);
-    }
-
-    if let Some(ref artwork_b64) = payload.new_artwork_base64 {
+    let new_picture = if let Some(ref artwork_b64) = payload.new_artwork_base64 {
         let (raw_bytes, detected_mime) = parse_base64_artwork(artwork_b64)?;
         let mime_type = match detected_mime.as_deref() {
             Some("image/png") => MimeType::Png,
             Some("image/jpeg") | Some("image/jpg") => MimeType::Jpeg,
             _ => MimeType::Jpeg,
         };
+        Some(
+            Picture::unchecked(raw_bytes)
+                .pic_type(PictureType::CoverFront)
+                .mime_type(mime_type)
+                .build(),
+        )
+    } else {
+        None
+    };
 
-        let picture = Picture::unchecked(raw_bytes)
-            .pic_type(PictureType::CoverFront)
-            .mime_type(mime_type)
-            .build();
-
-        tag.set_picture(0, picture);
+    let primary_type = tagged_file.primary_tag_type();
+    if tagged_file.tag(primary_type).is_none() {
+        tagged_file.insert_tag(Tag::new(primary_type));
     }
 
-    // Save tag to file
-    tag.save_to_path(path, WriteOptions::default())
-        .with_context(|| format!("Failed to save tag to: {}", path.display()))?;
+    // Synchronize tag modifications across ALL tags present in the audio file
+    // (e.g. ID3v1 + ID3v2 in MP3s, RIFF + ID3v2 in WAVs) so stale secondary tags don't retain deleted fields.
+    let tag_types: Vec<TagType> = tagged_file.tags().iter().map(|t| t.tag_type()).collect();
+    for tt in tag_types {
+        if let Some(tag) = tagged_file.tag_mut(tt) {
+            // Title
+            if let Some(title) = clean_title {
+                tag.set_title(title.to_string());
+            } else {
+                tag.remove_title();
+                tag.remove_key(ItemKey::TrackTitle);
+            }
+
+            // Artist
+            if let Some(artist) = clean_artist {
+                tag.set_artist(artist.to_string());
+            } else {
+                tag.remove_artist();
+                tag.remove_key(ItemKey::TrackArtist);
+            }
+
+            // Album
+            if let Some(album) = clean_album {
+                tag.set_album(album.to_string());
+            } else {
+                tag.remove_album();
+                tag.remove_key(ItemKey::AlbumTitle);
+                tag.remove_key(ItemKey::OriginalAlbumTitle);
+                tag.remove_key(ItemKey::AlbumTitleSortOrder);
+            }
+
+            // Year / Date
+            if let Some(year) = payload.year.filter(|&y| y > 0) {
+                tag.set_date(Timestamp {
+                    year: year as u16,
+                    ..Default::default()
+                });
+            } else {
+                tag.remove_date();
+                tag.remove_key(ItemKey::RecordingDate);
+                tag.remove_key(ItemKey::Year);
+            }
+
+            // Genre
+            if let Some(genre) = clean_genre {
+                tag.set_genre(genre.to_string());
+            } else {
+                tag.remove_genre();
+                tag.remove_key(ItemKey::Genre);
+            }
+
+            // Track number
+            if let Some(num) = payload.track_number.filter(|&n| n > 0) {
+                tag.set_track(num);
+            } else {
+                tag.remove_track();
+                tag.remove_key(ItemKey::TrackNumber);
+            }
+
+            // Track total
+            if let Some(total) = payload.track_total.filter(|&t| t > 0) {
+                tag.set_track_total(total);
+            } else {
+                tag.remove_track_total();
+                tag.remove_key(ItemKey::TrackTotal);
+            }
+
+            // Comment
+            if let Some(comment) = clean_comment {
+                tag.set_comment(comment.to_string());
+            } else {
+                tag.remove_comment();
+                tag.remove_key(ItemKey::Comment);
+            }
+
+            // Lyrics
+            if let Some(ref lyrics_text) = payload.lyrics {
+                let trimmed = lyrics_text.trim();
+                if trimmed.is_empty() {
+                    tag.remove_key(ItemKey::Lyrics);
+                    tag.remove_key(ItemKey::UnsyncLyrics);
+                } else {
+                    tag.insert_text(ItemKey::Lyrics, trimmed.to_string());
+                    tag.insert_text(ItemKey::UnsyncLyrics, trimmed.to_string());
+                }
+            }
+
+            // Artwork
+            if payload.remove_artwork {
+                tag.remove_picture_type(PictureType::CoverFront);
+                tag.remove_picture_type(PictureType::Other);
+                while !tag.pictures().is_empty() {
+                    tag.remove_picture(0);
+                }
+            }
+            if let Some(ref pic) = new_picture {
+                tag.set_picture(0, pic.clone());
+            }
+        }
+    }
+
+    // Manage external .lrc file
+    if let Some(ref lyrics_text) = payload.lyrics {
+        let trimmed = lyrics_text.trim();
+        let is_synced = crate::lyrics::is_synced_lrc(trimmed);
+        if trimmed.is_empty() {
+            let lrc_path = path.with_extension("lrc");
+            if lrc_path.is_file() {
+                let _ = fs::remove_file(lrc_path);
+            }
+        } else if payload.save_lrc_file || is_synced {
+            let lrc_path = path.with_extension("lrc");
+            let _ = fs::write(lrc_path, trimmed);
+        }
+    }
+
+    // Save all tags across the file
+    tagged_file.save_to_path(path, WriteOptions::default())
+        .with_context(|| format!("Failed to save audio tags to: {}", path.display()))?;
 
     // Re-read updated track
     let updated = read_track(path)?;
@@ -427,4 +472,198 @@ pub fn md5_hash(bytes: &[u8]) -> u128 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use lofty::tag::TagType;
+
+    fn create_test_wav(path: &Path) {
+        let mut f = fs::File::create(path).unwrap();
+        f.write_all(b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x04\x00\x00\x00\x00\x00\x00\x00").unwrap();
+    }
+
+    fn create_test_mp3(path: &Path) {
+        let mut f = fs::File::create(path).unwrap();
+        // A few valid MPEG 1 Layer 3 audio frames (417 bytes each for 128kbps, 44.1kHz)
+        let frame_header = [0xFF, 0xFB, 0x90, 0x00];
+        for _ in 0..5 {
+            f.write_all(&frame_header).unwrap();
+            f.write_all(&[0u8; 413]).unwrap();
+        }
+        // Append 128-byte ID3v1 tag at the end
+        let mut id3v1 = [0u8; 128];
+        id3v1[0..3].copy_from_slice(b"TAG");
+        // Title (3..33)
+        let title = b"Test Title";
+        id3v1[3..3 + title.len()].copy_from_slice(title);
+        // Artist (33..63)
+        let artist = b"Test Artist";
+        id3v1[33..33 + artist.len()].copy_from_slice(artist);
+        // Album (63..93)
+        let album = b"Old ID3v1 Album";
+        id3v1[63..63 + album.len()].copy_from_slice(album);
+        // Year (93..97)
+        id3v1[93..97].copy_from_slice(b"2024");
+        f.write_all(&id3v1).unwrap();
+    }
+
+    #[test]
+    fn test_mp3_id3v1_and_id3v2_album_clearing() {
+        let temp_dir = std::env::temp_dir().join("liertags_test_mp3_tags");
+        let _ = fs::create_dir_all(&temp_dir);
+        let mp3_path = temp_dir.join("test_song.mp3");
+        create_test_mp3(&mp3_path);
+
+        // Verify ID3v1 is parsed
+        {
+            let tagged_file = Probe::open(&mp3_path).unwrap().read().unwrap();
+            println!("Initial MP3 tags count: {}", tagged_file.tags().len());
+            for t in tagged_file.tags() {
+                println!("Initial MP3 tag: {:?}, album: {:?}", t.tag_type(), t.album());
+            }
+        }
+
+        // Now save an ID3v2 tag with an album as well
+        let payload_set = SaveTrackPayload {
+            file_path: mp3_path.to_string_lossy().to_string(),
+            title: Some("Test Title".to_string()),
+            artist: Some("Test Artist".to_string()),
+            album: Some("ID3v2 Album".to_string()),
+            year: Some(2024),
+            genre: None,
+            track_number: None,
+            track_total: None,
+            comment: None,
+            lyrics: None,
+            save_lrc_file: false,
+            new_artwork_base64: None,
+            remove_artwork: false,
+        };
+        let _ = save_track(&payload_set).unwrap();
+
+        // Now clear the album
+        let payload_clear = SaveTrackPayload {
+            file_path: mp3_path.to_string_lossy().to_string(),
+            title: Some("Test Title".to_string()),
+            artist: Some("Test Artist".to_string()),
+            album: None,
+            year: Some(2024),
+            genre: None,
+            track_number: None,
+            track_total: None,
+            comment: None,
+            lyrics: None,
+            save_lrc_file: false,
+            new_artwork_base64: None,
+            remove_artwork: false,
+        };
+        let res = save_track(&payload_clear).unwrap();
+        assert_eq!(res.metadata.album, None);
+
+        let tagged_file_after = Probe::open(&mp3_path).unwrap().read().unwrap();
+        for t in tagged_file_after.tags() {
+            assert_eq!(t.album(), None, "Tag {:?} must have album cleared", t.tag_type());
+        }
+
+        let _ = fs::remove_file(&mp3_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_empty_string_album() {
+        let temp_dir = std::env::temp_dir().join("liertags_test_empty_album");
+        let _ = fs::create_dir_all(&temp_dir);
+        let wav_path = temp_dir.join("test_empty.wav");
+        create_test_wav(&wav_path);
+
+        let mut id3_tag = Tag::new(TagType::Id3v2);
+        id3_tag.set_album("Initial Album".to_string());
+        id3_tag.save_to_path(&wav_path, WriteOptions::default()).unwrap();
+
+        let payload_empty_str = SaveTrackPayload {
+            file_path: wav_path.to_string_lossy().to_string(),
+            title: Some("Title".to_string()),
+            artist: Some("Artist".to_string()),
+            album: Some("".to_string()),
+            year: None,
+            genre: None,
+            track_number: None,
+            track_total: None,
+            comment: None,
+            lyrics: None,
+            save_lrc_file: false,
+            new_artwork_base64: None,
+            remove_artwork: false,
+        };
+
+        let res = save_track(&payload_empty_str).unwrap();
+        assert_eq!(res.metadata.album, None);
+
+        let tagged_file_after = Probe::open(&wav_path).unwrap().read().unwrap();
+        for t in tagged_file_after.tags() {
+            assert_eq!(t.album(), None, "Tag {:?} must have album cleared when empty string passed", t.tag_type());
+        }
+
+        let _ = fs::remove_file(&wav_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_save_and_remove_album_multiple_tags() {
+        let temp_dir = std::env::temp_dir().join("liertags_test_multitags");
+        let _ = fs::create_dir_all(&temp_dir);
+        let wav_path = temp_dir.join("test_multi.wav");
+        create_test_wav(&wav_path);
+
+        // 1. Manually insert TWO tags into the file: RiffInfo AND Id3v2, both having the album!
+        {
+            let mut riff_tag = Tag::new(TagType::RiffInfo);
+            riff_tag.set_album("Old Riff Album".to_string());
+            riff_tag.save_to_path(&wav_path, WriteOptions::default()).unwrap();
+
+            let mut id3_tag = Tag::new(TagType::Id3v2);
+            id3_tag.set_album("Old ID3 Album".to_string());
+            id3_tag.save_to_path(&wav_path, WriteOptions::default()).unwrap();
+        }
+
+        // Verify file has 2 tags
+        {
+            let tagged_file = Probe::open(&wav_path).unwrap().read().unwrap();
+            println!("Tags count in file: {}", tagged_file.tags().len());
+            for t in tagged_file.tags() {
+                println!("Tag {:?} album: {:?}", t.tag_type(), t.album());
+            }
+        }
+
+        // 2. Now call save_track with album = None (user deleted the album in UI)
+        let payload_clear = SaveTrackPayload {
+            file_path: wav_path.to_string_lossy().to_string(),
+            title: Some("My Title".to_string()),
+            artist: Some("My Artist".to_string()),
+            album: None,
+            year: Some(2024),
+            genre: None,
+            track_number: None,
+            track_total: None,
+            comment: None,
+            lyrics: None,
+            save_lrc_file: false,
+            new_artwork_base64: None,
+            remove_artwork: false,
+        };
+
+        let res = save_track(&payload_clear).unwrap();
+        assert_eq!(res.metadata.album, None);
+
+        let tagged_file_after = Probe::open(&wav_path).unwrap().read().unwrap();
+        for t in tagged_file_after.tags() {
+            assert_eq!(t.album(), None, "Tag {:?} must have album cleared", t.tag_type());
+        }
+
+        let _ = fs::remove_file(&wav_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }
