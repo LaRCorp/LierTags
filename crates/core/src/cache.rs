@@ -128,6 +128,8 @@ impl LibraryCache {
                     track_number,
                     track_total,
                     comment,
+                    lyrics: None,
+                    is_synced_lyrics: false,
                     has_artwork,
                     artwork_mime,
                     artwork_base64: None, // lazy loaded
@@ -138,6 +140,7 @@ impl LibraryCache {
                     sample_rate_hz,
                     channels,
                 },
+                dirty: false,
             };
 
             Ok((file_path, TrackCacheEntry { file_size, mtime, track }))
@@ -201,6 +204,8 @@ impl LibraryCache {
                     track_number,
                     track_total,
                     comment,
+                    lyrics: None,
+                    is_synced_lyrics: false,
                     has_artwork,
                     artwork_mime,
                     artwork_base64: None,
@@ -211,6 +216,7 @@ impl LibraryCache {
                     sample_rate_hz,
                     channels,
                 },
+                dirty: false,
             })
         }).ok()?;
 
@@ -286,6 +292,27 @@ impl LibraryCache {
     /// Invalidate or update single track
     pub fn update_single(&self, track: &Track, mtime: u64) -> Result<()> {
         self.save_batch(&[(track, mtime)])
+    }
+
+    /// Remove a single file path from cache
+    pub fn remove_path(&self, file_path: &str) -> Result<()> {
+        let conn = self.connect()?;
+        conn.execute("DELETE FROM track_cache WHERE file_path = ?1", params![file_path])?;
+        Ok(())
+    }
+
+    /// Remove multiple paths from cache in a single transaction
+    pub fn remove_paths(&self, file_paths: &[String]) -> Result<()> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached("DELETE FROM track_cache WHERE file_path = ?1")?;
+            for p in file_paths {
+                let _ = stmt.execute(params![p]);
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 }
 

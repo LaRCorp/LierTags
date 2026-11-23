@@ -98,3 +98,91 @@ pub fn get_server_status() -> serde_json::Value {
         "extension_target": "LierEX-Q"
     })
 }
+
+#[tauri::command]
+pub async fn find_lyrics(
+    title: String,
+    artist: Option<String>,
+    album: Option<String>,
+    duration: Option<u64>,
+) -> Result<Option<liertags_core::models::LrcLibLyrics>, String> {
+    liertags_core::lyrics::find_lyrics(&title, artist.as_deref(), album.as_deref(), duration)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_lyrics(
+    file_path: String,
+    lyrics: String,
+    save_lrc_file: bool,
+) -> Result<(), String> {
+    liertags_core::lyrics::save_lyrics_to_file(Path::new(&file_path), &lyrics, save_lrc_file)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn preview_organize(
+    folder_path: Option<String>,
+    target_folder: Option<String>,
+    template: String,
+    tracks: Option<Vec<Track>>,
+) -> Result<Vec<liertags_core::models::OrganizePreviewItem>, String> {
+    let track_list = if let Some(trks) = tracks {
+        if !trks.is_empty() {
+            trks
+        } else if let Some(ref fp) = folder_path {
+            tags::scan_folder(Path::new(fp), true).map_err(|e| e.to_string())?
+        } else {
+            Vec::new()
+        }
+    } else if let Some(ref fp) = folder_path {
+        tags::scan_folder(Path::new(fp), true).map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+
+    let base_folder_str = target_folder
+        .or(folder_path)
+        .ok_or_else(|| "Целевая папка не указана".to_string())?;
+
+    let base_path = Path::new(&base_folder_str);
+    Ok(liertags_core::organizer::preview_organization(&track_list, base_path, &template))
+}
+
+#[tauri::command]
+pub async fn organize_files(
+    actions: Vec<liertags_core::models::OrganizeAction>,
+) -> Result<liertags_core::models::OrganizeSummary, String> {
+    liertags_core::organizer::organize_files(&actions).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn find_duplicates(
+    folder_path: Option<String>,
+    mode: liertags_core::models::DuplicateMode,
+    tracks: Option<Vec<Track>>,
+) -> Result<Vec<liertags_core::models::DuplicateGroup>, String> {
+    let track_list = if let Some(trks) = tracks {
+        if !trks.is_empty() {
+            trks
+        } else if let Some(ref fp) = folder_path {
+            tags::scan_folder(Path::new(fp), true).map_err(|e| e.to_string())?
+        } else {
+            Vec::new()
+        }
+    } else if let Some(ref fp) = folder_path {
+        tags::scan_folder(Path::new(fp), true).map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
+    };
+
+    Ok(liertags_core::duplicates::find_duplicates(&track_list, mode))
+}
+
+#[tauri::command]
+pub async fn delete_duplicate_files(
+    file_paths: Vec<String>,
+) -> Result<liertags_core::models::DeleteSummary, String> {
+    liertags_core::duplicates::delete_duplicate_files(&file_paths).map_err(|e| e.to_string())
+}

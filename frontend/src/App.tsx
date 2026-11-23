@@ -7,7 +7,20 @@ import { Track, SaveTrackPayload, ImportPayload, MusicBrainzRecording, DropResul
 import { TrackTable } from './components/TrackTable';
 import { EditPanel } from './components/EditPanel';
 import { ImportModal } from './components/ImportModal';
-import { FolderOpen, FileAudio, Radio, RefreshCw, RotateCcw, Search, UploadCloud } from 'lucide-react';
+import { OrganizerTab } from './components/OrganizerTab';
+import { DuplicatesTab } from './components/DuplicatesTab';
+import {
+  FolderOpen,
+  FileAudio,
+  Radio,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  UploadCloud,
+  Music,
+  FolderTree,
+  Copy,
+} from 'lucide-react';
 
 const LAST_FOLDER_KEY = 'liertags_last_folder';
 
@@ -21,6 +34,7 @@ export const App: React.FC = () => {
   const [isDraggingOverWindow, setIsDraggingOverWindow] = useState<boolean>(false);
   const [importModalPayload, setImportModalPayload] = useState<ImportPayload | null>(null);
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'library' | 'organizer' | 'duplicates'>('library');
 
   // Active track derived from selected ID
   const activeTrack = tracks.find((t) => t.id === selectedTrackId) || null;
@@ -427,6 +441,45 @@ export const App: React.FC = () => {
           )}
         </div>
 
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-1 bg-[#121317] p-1 rounded-md border border-[#292c3a]">
+          <button
+            onClick={() => setActiveTab('library')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded transition-colors cursor-pointer ${
+              activeTab === 'library'
+                ? 'bg-[#39C5BB] text-black shadow-xs'
+                : 'text-[#A6ABB8] hover:text-white'
+            }`}
+          >
+            <Music className="w-3.5 h-3.5" />
+            <span>Библиотека</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('organizer')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded transition-colors cursor-pointer ${
+              activeTab === 'organizer'
+                ? 'bg-[#39C5BB] text-black shadow-xs'
+                : 'text-[#A6ABB8] hover:text-white'
+            }`}
+          >
+            <FolderTree className="w-3.5 h-3.5" />
+            <span>Органайзер</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('duplicates')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded transition-colors cursor-pointer ${
+              activeTab === 'duplicates'
+                ? 'bg-[#39C5BB] text-black shadow-xs'
+                : 'text-[#A6ABB8] hover:text-white'
+            }`}
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Дубликаты</span>
+          </button>
+        </div>
+
         {/* Center / Right controls */}
         <div className="flex items-center gap-4">
           <div className="relative">
@@ -451,20 +504,40 @@ export const App: React.FC = () => {
 
       {/* Main Workspace Body */}
       <main className="flex-1 flex gap-3 p-3 overflow-hidden">
-        <TrackTable
-          tracks={tracks}
-          selectedTrackId={selectedTrackId}
-          onSelectTrack={(t) => setSelectedTrackId(t.id)}
-          searchQuery={searchQuery}
-        />
-        <EditPanel
-          track={activeTrack}
-          onSave={handleSaveTrack}
-          onSearchMusicBrainz={handleSearchMusicBrainz}
-          onReload={handleReloadActiveTrack}
-          isSaving={isSaving}
-          isReloading={isReloading}
-        />
+        {activeTab === 'library' && (
+          <>
+            <TrackTable
+              tracks={tracks}
+              selectedTrackId={selectedTrackId}
+              onSelectTrack={(t) => setSelectedTrackId(t.id)}
+              searchQuery={searchQuery}
+            />
+            <EditPanel
+              track={activeTrack}
+              onSave={handleSaveTrack}
+              onSearchMusicBrainz={handleSearchMusicBrainz}
+              onReload={handleReloadActiveTrack}
+              isSaving={isSaving}
+              isReloading={isReloading}
+            />
+          </>
+        )}
+
+        {activeTab === 'organizer' && (
+          <OrganizerTab
+            tracks={tracks}
+            currentFolder={currentFolder}
+            onRefreshLibrary={handleRescanFolder}
+          />
+        )}
+
+        {activeTab === 'duplicates' && (
+          <DuplicatesTab
+            tracks={tracks}
+            currentFolder={currentFolder}
+            onRefreshLibrary={handleRescanFolder}
+          />
+        )}
       </main>
 
       {/* Import Modal from LierEX-Q */}

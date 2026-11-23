@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Track, SaveTrackPayload, MusicBrainzRecording } from '../types';
+import { invoke } from '@tauri-apps/api/core';
+import { Track, SaveTrackPayload, MusicBrainzRecording, LrcLibLyrics } from '../types';
 import {
   Save,
   Search,
@@ -9,6 +10,9 @@ import {
   RotateCcw,
   Disc,
   ClipboardPaste,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 
 interface EditPanelProps {
@@ -35,6 +39,9 @@ export const EditPanel: React.FC<EditPanelProps> = ({
   const [isSearchingMb, setIsSearchingMb] = useState<boolean>(false);
   const [showMbDropdown, setShowMbDropdown] = useState<boolean>(false);
   const [isDraggingOverCover, setIsDraggingOverCover] = useState<boolean>(false);
+  const [isSearchingLyrics, setIsSearchingLyrics] = useState<boolean>(false);
+  const [saveLrcFile, setSaveLrcFile] = useState<boolean>(false);
+  const [lyricsStatus, setLyricsStatus] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   useEffect(() => {
     if (track) {
@@ -48,14 +55,17 @@ export const EditPanel: React.FC<EditPanelProps> = ({
         track_number: track.metadata.track_number,
         track_total: track.metadata.track_total,
         comment: track.metadata.comment || '',
+        lyrics: track.metadata.lyrics || '',
         remove_artwork: false,
       });
       setArtworkPreview(track.metadata.artwork_base64 || null);
       setRemoveArtwork(false);
       setShowMbDropdown(false);
+      setLyricsStatus(null);
     } else {
       setFormData({});
       setArtworkPreview(null);
+      setLyricsStatus(null);
     }
   }, [track]);
 
@@ -181,9 +191,46 @@ export const EditPanel: React.FC<EditPanelProps> = ({
       track_number: formData.track_number ? Number(formData.track_number) : undefined,
       track_total: formData.track_total ? Number(formData.track_total) : undefined,
       comment: formData.comment || undefined,
+      lyrics: formData.lyrics !== undefined ? formData.lyrics : undefined,
+      save_lrc_file: saveLrcFile,
       new_artwork_base64: formData.new_artwork_base64,
       remove_artwork: removeArtwork,
     });
+  };
+
+  const handleFindLyrics = async () => {
+    const title = formData.title || track.metadata.title || track.file_name;
+    if (!title) {
+      setLyricsStatus({ type: 'error', text: 'Укажите название трека для поиска' });
+      return;
+    }
+
+    setIsSearchingLyrics(true);
+    setLyricsStatus(null);
+    try {
+      const res = await invoke<LrcLibLyrics | null>('find_lyrics', {
+        title,
+        artist: formData.artist || track.metadata.artist || undefined,
+        album: formData.album || track.metadata.album || undefined,
+        duration: track.properties.duration_seconds || undefined,
+      });
+
+      if (res && (res.syncedLyrics || res.plainLyrics)) {
+        const foundText = res.syncedLyrics || res.plainLyrics || '';
+        const isSynced = Boolean(res.syncedLyrics);
+        setFormData((prev) => ({ ...prev, lyrics: foundText }));
+        setLyricsStatus({
+          type: 'success',
+          text: isSynced ? 'Синхронизированный текст LRC найден в LRCLIB!' : 'Текст песни найден в LRCLIB!',
+        });
+      } else {
+        setLyricsStatus({ type: 'info', text: 'Текст не найден в открытой базе LRCLIB' });
+      }
+    } catch (err) {
+      setLyricsStatus({ type: 'error', text: `Ошибка поиска текста: ${err}` });
+    } finally {
+      setIsSearchingLyrics(false);
+    }
   };
 
   const handleSearchMusicBrainz = async () => {
@@ -229,15 +276,27 @@ export const EditPanel: React.FC<EditPanelProps> = ({
           </button>
         </div>
 
-        <button
-          onClick={handleSearchMusicBrainz}
-          disabled={isSearchingMb}
-          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-[#272935] hover:bg-[#323544] text-[#39C5BB] transition-colors border border-[#39C5BB]/20 cursor-pointer"
-          title="Поиск недостающих метаданных в MusicBrainz"
-        >
-          {isSearchingMb ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
-          <span>MusicBrainz</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleFindLyrics}
+            disabled={isSearchingLyrics}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-[#272935] hover:bg-[#323544] text-[#E0E2EC] transition-colors border border-[#393c4e] cursor-pointer"
+            title="Поиск текста трека в открытой базе LRCLIB"
+          >
+            {isSearchingLyrics ? <RefreshCw className="w-3 h-3 animate-spin text-[#39C5BB]" /> : <FileText className="w-3 h-3 text-[#39C5BB]" />}
+            <span>Текст</span>
+          </button>
+
+          <button
+            onClick={handleSearchMusicBrainz}
+            disabled={isSearchingMb}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-[#272935] hover:bg-[#323544] text-[#39C5BB] transition-colors border border-[#39C5BB]/20 cursor-pointer"
+            title="Поиск недостающих метаданных в MusicBrainz"
+          >
+            {isSearchingMb ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+            <span>MusicBrainz</span>
+          </button>
+        </div>
       </div>
 
       {/* MusicBrainz match dropdown */}
@@ -407,6 +466,87 @@ export const EditPanel: React.FC<EditPanelProps> = ({
             className="w-full px-3 py-1.5 bg-[#14151a] border border-[#2e313d] focus:border-[#39C5BB] rounded text-xs text-white outline-none transition-colors resize-none"
             placeholder="Заметки или описание..."
           />
+        </div>
+
+        {/* Lyrics Section */}
+        <div className="pt-2 border-t border-[#272935] space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <FileText className="w-3.5 h-3.5 text-[#39C5BB]" />
+              <label className="text-[11px] font-semibold text-[#C8CBD8]">Текст песни (Lyrics)</label>
+              {formData.lyrics && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                    formData.lyrics.includes('[') && formData.lyrics.includes(']')
+                      ? 'bg-[#39C5BB]/15 text-[#39C5BB] border border-[#39C5BB]/30'
+                      : 'bg-[#292c3a] text-[#9EA2B0]'
+                  }`}
+                >
+                  {formData.lyrics.includes('[') && formData.lyrics.includes(']') ? 'LRC Synced' : 'Plain'}
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleFindLyrics}
+              disabled={isSearchingLyrics}
+              className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-[#282a36] hover:bg-[#333747] text-[#39C5BB] border border-[#39C5BB]/30 transition-colors cursor-pointer"
+              title="Найти текст в LRCLIB"
+            >
+              {isSearchingLyrics ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+              <span>Найти текст</span>
+            </button>
+          </div>
+
+          {lyricsStatus && (
+            <div
+              className={`p-2 rounded text-[11px] flex items-center gap-1.5 ${
+                lyricsStatus.type === 'success'
+                  ? 'bg-[#39C5BB]/10 text-[#39C5BB] border border-[#39C5BB]/20'
+                  : lyricsStatus.type === 'error'
+                  ? 'bg-[#8B0000]/15 text-[#ff8080] border border-[#8B0000]/30'
+                  : 'bg-[#262835] text-[#A6ABB8] border border-[#343747]'
+              }`}
+            >
+              {lyricsStatus.type === 'success' ? (
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span>{lyricsStatus.text}</span>
+            </div>
+          )}
+
+          <textarea
+            rows={5}
+            value={formData.lyrics || ''}
+            onChange={(e) => handleInputChange('lyrics', e.target.value)}
+            className="w-full px-3 py-1.5 bg-[#14151a] border border-[#2e313d] focus:border-[#39C5BB] rounded text-[11px] font-mono text-white outline-none transition-colors resize-y"
+            placeholder="Текст трека или тайминги LRC..."
+          />
+
+          <div className="flex items-center justify-between text-[11px]">
+            <label className="flex items-center gap-2 text-[#9EA2B0] hover:text-[#E0E2EC] cursor-pointer">
+              <input
+                type="checkbox"
+                checked={saveLrcFile}
+                onChange={(e) => setSaveLrcFile(e.target.checked)}
+                className="w-3.5 h-3.5 rounded bg-[#14151a] border-[#343747] text-[#39C5BB] focus:ring-0 cursor-pointer"
+              />
+              <span>Сохранять .lrc файл рядом с аудио</span>
+            </label>
+
+            {formData.lyrics && (
+              <button
+                type="button"
+                onClick={() => setFormData((prev) => ({ ...prev, lyrics: '' }))}
+                className="text-[10px] text-[#8E92A2] hover:text-[#ff7070] cursor-pointer"
+              >
+                Очистить текст
+              </button>
+            )}
+          </div>
         </div>
 
         {/* File details */}

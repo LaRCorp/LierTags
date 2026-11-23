@@ -8,7 +8,7 @@ use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::items::Timestamp;
-use lofty::tag::Tag;
+use lofty::tag::{ItemKey, Tag};
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
@@ -66,6 +66,8 @@ pub fn read_track_summary(path: &Path) -> Result<Track> {
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
 
+    let (lyrics, is_synced_lyrics) = crate::lyrics::read_lyrics_from_path(path);
+
     let metadata = if let Some(tag) = primary_or_first {
         let picture = tag
             .pictures()
@@ -85,12 +87,18 @@ pub fn read_track_summary(path: &Path) -> Result<Track> {
             track_number: tag.track(),
             track_total: tag.track_total(),
             comment: tag.comment().map(|s| s.to_string()),
+            lyrics,
+            is_synced_lyrics,
             has_artwork,
             artwork_mime,
             artwork_base64: None, // intentionally omitted during library scan for speed
         }
     } else {
-        TrackMetadata::default()
+        TrackMetadata {
+            lyrics,
+            is_synced_lyrics,
+            ..Default::default()
+        }
     };
 
     let id = format!("{:x}", md5_hash(path.to_string_lossy().as_bytes()));
@@ -103,6 +111,7 @@ pub fn read_track_summary(path: &Path) -> Result<Track> {
         extension,
         metadata,
         properties: audio_properties,
+        dirty: false,
     })
 }
 
@@ -330,6 +339,26 @@ pub fn save_track(payload: &SaveTrackPayload) -> Result<Track> {
         tag.set_comment(comment.clone());
     } else {
         tag.remove_comment();
+    }
+
+    // Lyrics management
+    if let Some(ref lyrics_text) = payload.lyrics {
+        let is_synced = crate::lyrics::is_synced_lrc(lyrics_text);
+        if lyrics_text.trim().is_empty() {
+            tag.remove_key(ItemKey::Lyrics);
+            tag.remove_key(ItemKey::UnsyncLyrics);
+            let lrc_path = path.with_extension("lrc");
+            if lrc_path.is_file() {
+                let _ = fs::remove_file(lrc_path);
+            }
+        } else {
+            tag.insert_text(ItemKey::Lyrics, lyrics_text.clone());
+            tag.insert_text(ItemKey::UnsyncLyrics, lyrics_text.clone());
+            if payload.save_lrc_file || is_synced {
+                let lrc_path = path.with_extension("lrc");
+                let _ = fs::write(lrc_path, lyrics_text);
+            }
+        }
     }
 
     // Artwork management

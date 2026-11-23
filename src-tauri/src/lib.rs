@@ -44,7 +44,13 @@ pub fn run() {
             save_tags,
             search_musicbrainz,
             fetch_cover_image,
-            get_server_status
+            get_server_status,
+            find_lyrics,
+            save_lyrics,
+            preview_organize,
+            organize_files,
+            find_duplicates,
+            delete_duplicate_files
         ])
         .run(tauri::generate_context!())
         .expect("Error while running LierTags application");
