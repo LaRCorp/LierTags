@@ -1,0 +1,23 @@
+[package]
+name = "liertags-app"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+authors = ["LaRevole"]
+description = "Tauri 2 host application for LierTags"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-fs = "2.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "rt", "net"] }
+liertags-core = { path = "../crates/core" }

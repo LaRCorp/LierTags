@@ -1,0 +1,51 @@
+mod commands;
+
+use commands::*;
+use liertags_core::models::ImportPayload;
+use liertags_core::server::{start_import_server, DEFAULT_SERVER_PORT};
+use tauri::Emitter;
+use tokio::sync::broadcast;
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            let app_handle = app.handle().clone();
+
+            // Channel for HTTP import server
+            let (tx, mut rx) = broadcast::channel::<ImportPayload>(32);
+
+            // Spawn local Axum HTTP server on port 8766
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = start_import_server(DEFAULT_SERVER_PORT, tx).await {
+                    eprintln!("Failed to run LierTags import server: {}", err);
+                }
+            });
+
+            // Bridge HTTP server broadcast into Tauri UI events
+            tauri::async_runtime::spawn(async move {
+                while let Ok(payload) = rx.recv().await {
+                    println!("Forwarding imported track to UI: {}", payload.title);
+                    if let Err(err) = app_handle.emit("track_imported", payload) {
+                        eprintln!("Failed to emit Tauri event: {}", err);
+                    }
+                }
+            });
+
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            scan_folder,
+            open_files,
+            handle_dropped_paths,
+            read_track,
+            read_track_artwork,
+            save_tags,
+            search_musicbrainz,
+            fetch_cover_image,
+            get_server_status
+        ])
+        .run(tauri::generate_context!())
+        .expect("Error while running LierTags application");
+}
