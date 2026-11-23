@@ -104,6 +104,8 @@ async fn main() -> Result<()> {
                 track_number: track,
                 track_total: None,
                 comment,
+                lyrics: None,
+                save_lrc_file: false,
                 new_artwork_base64: artwork_b64,
                 remove_artwork: false,
             };
@@ -136,6 +138,8 @@ async fn main() -> Result<()> {
                 track_number: import_data.track_number,
                 track_total: None,
                 comment: import_data.comment,
+                lyrics: None,
+                save_lrc_file: false,
                 new_artwork_base64: None,
                 remove_artwork: false,
             };
