@@ -140,3 +140,30 @@ export interface PagedTracksResult {
   offset: number;
   limit: number;
 }
+
+export interface EcosystemAppStatus {
+  id: string;
+  name: string;
+  port: number;
+  online: boolean;
+  version?: string;
+  detail: string;
+}
+
+export interface LierkourOstCandidate {
+  id: number;
+  title: string;
+  original_title?: string;
+  media_type: string;
+  creator?: string;
+  year?: number;
+  genres?: string;
+  poster_data_uri?: string;
+}
+
+export interface LierSyncSendResult {
+  success: boolean;
+  target?: string;
+  sent_files: number;
+  bytes: number;
+}

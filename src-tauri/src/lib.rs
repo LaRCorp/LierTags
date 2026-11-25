@@ -2,7 +2,7 @@ mod commands;
 
 use commands::*;
 use liertags_core::models::ImportPayload;
-use liertags_core::server::{start_import_server, DEFAULT_SERVER_PORT};
+use liertags_core::server::{DEFAULT_SERVER_PORT, start_import_server};
 use tauri::Emitter;
 use tokio::sync::broadcast;
 
@@ -69,7 +69,10 @@ pub fn run() {
             preview_organize,
             organize_files,
             find_duplicates,
-            delete_duplicate_files
+            delete_duplicate_files,
+            probe_lier_ecosystem,
+            send_paths_to_liersync,
+            search_lierkour_ost
         ])
         .run(tauri::generate_context!())
         .expect("Error while running LierTags application");

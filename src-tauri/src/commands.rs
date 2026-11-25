@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use liertags_core::api;
 use liertags_core::models::{MusicBrainzRecording, SaveTrackPayload, Track};
 use liertags_core::tags;
-use liertags_core::api;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 #[derive(Serialize)]
 pub struct PagedTracksResult {
@@ -40,8 +40,7 @@ pub async fn get_tracks_paged(
 
 #[tauri::command]
 pub async fn scan_folder(folder_path: String, recursive: bool) -> Result<Vec<Track>, String> {
-    tags::scan_folder(Path::new(&folder_path), recursive)
-        .map_err(|e| e.to_string())
+    tags::scan_folder(Path::new(&folder_path), recursive).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -89,32 +88,27 @@ pub async fn handle_dropped_paths(paths: Vec<String>) -> Result<DropResult, Stri
 
 #[tauri::command]
 pub async fn read_track(file_path: String) -> Result<Track, String> {
-    tags::read_track(Path::new(&file_path))
-        .map_err(|e| e.to_string())
+    tags::read_track(Path::new(&file_path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn read_track_artwork(file_path: String) -> Result<Option<String>, String> {
-    tags::read_track_artwork(Path::new(&file_path))
-        .map_err(|e| e.to_string())
+    tags::read_track_artwork(Path::new(&file_path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn save_tags(payload: SaveTrackPayload) -> Result<Track, String> {
-    tags::save_track(&payload)
-        .map_err(|e| e.to_string())
+    tags::save_track(&payload).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn search_musicbrainz(query: String) -> Result<Vec<MusicBrainzRecording>, String> {
-    api::search_musicbrainz(&query, 10)
-        .map_err(|e| e.to_string())
+    api::search_musicbrainz(&query, 10).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn fetch_cover_image(url: String) -> Result<String, String> {
-    api::fetch_artwork_as_data_uri(&url)
-        .map_err(|e| e.to_string())
+    api::fetch_artwork_as_data_uri(&url).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -174,7 +168,11 @@ pub async fn preview_organize(
         .ok_or_else(|| "Целевая папка не указана".to_string())?;
 
     let base_path = Path::new(&base_folder_str);
-    Ok(liertags_core::organizer::preview_organization(&track_list, base_path, &template))
+    Ok(liertags_core::organizer::preview_organization(
+        &track_list,
+        base_path,
+        &template,
+    ))
 }
 
 #[tauri::command]
@@ -204,7 +202,10 @@ pub async fn find_duplicates(
         Vec::new()
     };
 
-    Ok(liertags_core::duplicates::find_duplicates(&track_list, mode))
+    Ok(liertags_core::duplicates::find_duplicates(
+        &track_list,
+        mode,
+    ))
 }
 
 #[tauri::command]
@@ -212,4 +213,34 @@ pub async fn delete_duplicate_files(
     file_paths: Vec<String>,
 ) -> Result<liertags_core::models::DeleteSummary, String> {
     liertags_core::duplicates::delete_duplicate_files(&file_paths).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn probe_lier_ecosystem() -> Vec<liertags_core::ecosystem::EcosystemAppStatus> {
+    tokio::task::spawn_blocking(liertags_core::ecosystem::probe_ecosystem)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn send_paths_to_liersync(
+    paths: Vec<String>,
+    target: Option<String>,
+) -> Result<liertags_core::ecosystem::LierSyncSendResult, String> {
+    tokio::task::spawn_blocking(move || {
+        liertags_core::ecosystem::send_paths_to_liersync(&paths, target.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn search_lierkour_ost(
+    query: String,
+) -> Result<Vec<liertags_core::ecosystem::LierkourOstCandidate>, String> {
+    tokio::task::spawn_blocking(move || liertags_core::ecosystem::search_lierkour_ost(&query))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }

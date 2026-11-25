@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::models::MusicBrainzRecording;
 
-const APP_USER_AGENT: &str = "LierTags/0.1.0 (https://github.com/LaRevole/LierTags)";
+const APP_USER_AGENT: &str = "LierTags/1.1.0 (https://github.com/LaRCorp/LierTags)";
 
 /// Query MusicBrainz Recording API for song information
 pub fn search_musicbrainz(query: &str, limit: usize) -> Result<Vec<MusicBrainzRecording>> {
@@ -27,8 +27,16 @@ pub fn search_musicbrainz(query: &str, limit: usize) -> Result<Vec<MusicBrainzRe
     let mut results = Vec::new();
     if let Some(recordings) = json.get("recordings").and_then(|r| r.as_array()) {
         for rec in recordings {
-            let id = rec.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let title = rec.get("title").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let id = rec
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let title = rec
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
 
             let artist = rec
                 .get("artist-credit")

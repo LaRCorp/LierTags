@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use liertags_core::models::{ImportPayload, SaveTrackPayload};
 use liertags_core::tags::{read_track, save_track, scan_folder};
+use std::fs;
+use std::path::PathBuf;
 use tokio::sync::broadcast;
 
 #[derive(Parser)]
@@ -88,9 +88,11 @@ async fn main() -> Result<()> {
 
             let mut artwork_b64 = None;
             if let Some(art_path) = artwork {
-                let bytes = fs::read(&art_path)
-                    .with_context(|| format!("Failed to read artwork file: {}", art_path.display()))?;
-                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                let bytes = fs::read(&art_path).with_context(|| {
+                    format!("Failed to read artwork file: {}", art_path.display())
+                })?;
+                let b64 =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
                 artwork_b64 = Some(b64);
             }
 
@@ -148,7 +150,11 @@ async fn main() -> Result<()> {
             println!("Import applied successfully to: {}", updated.file_path);
         }
         Commands::Scan { folder, recursive } => {
-            println!("Scanning directory: {} (recursive: {})", folder.display(), recursive);
+            println!(
+                "Scanning directory: {} (recursive: {})",
+                folder.display(),
+                recursive
+            );
             let tracks = scan_folder(&folder, recursive)?;
             println!("Found {} supported audio tracks:", tracks.len());
             for (idx, t) in tracks.iter().enumerate() {

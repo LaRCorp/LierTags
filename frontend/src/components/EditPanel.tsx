@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Track, SaveTrackPayload, MusicBrainzRecording, LrcLibLyrics } from '../types';
+import { Track, SaveTrackPayload, MusicBrainzRecording, LrcLibLyrics, LierkourOstCandidate } from '../types';
 import {
   Save,
   Search,
@@ -13,6 +13,7 @@ import {
   FileText,
   CheckCircle2,
   AlertCircle,
+  Film,
 } from 'lucide-react';
 
 interface EditPanelProps {
@@ -38,6 +39,10 @@ export const EditPanel: React.FC<EditPanelProps> = ({
   const [mbResults, setMbResults] = useState<MusicBrainzRecording[]>([]);
   const [isSearchingMb, setIsSearchingMb] = useState<boolean>(false);
   const [showMbDropdown, setShowMbDropdown] = useState<boolean>(false);
+  const [ostResults, setOstResults] = useState<LierkourOstCandidate[]>([]);
+  const [isSearchingOst, setIsSearchingOst] = useState<boolean>(false);
+  const [showOstDropdown, setShowOstDropdown] = useState<boolean>(false);
+  const [ostError, setOstError] = useState<string | null>(null);
   const [isDraggingOverCover, setIsDraggingOverCover] = useState<boolean>(false);
   const [isSearchingLyrics, setIsSearchingLyrics] = useState<boolean>(false);
   const [saveLrcFile, setSaveLrcFile] = useState<boolean>(false);
@@ -61,6 +66,8 @@ export const EditPanel: React.FC<EditPanelProps> = ({
       setArtworkPreview(track.metadata.artwork_base64 || null);
       setRemoveArtwork(false);
       setShowMbDropdown(false);
+      setShowOstDropdown(false);
+      setOstError(null);
       setLyricsStatus(null);
     } else {
       setFormData({});
@@ -264,6 +271,43 @@ export const EditPanel: React.FC<EditPanelProps> = ({
     setShowMbDropdown(false);
   };
 
+  const handleSearchLierkourOst = async () => {
+    const query = (formData.album || formData.title || track.file_name || '').trim();
+    setIsSearchingOst(true);
+    setOstError(null);
+    try {
+      const results = await invoke<LierkourOstCandidate[]>('search_lierkour_ost', { query });
+      setOstResults(results);
+      setShowOstDropdown(true);
+      if (results.length === 0) {
+        setOstError('Совпадений в Lierkour не найдено');
+      }
+    } catch (err) {
+      setOstResults([]);
+      setShowOstDropdown(true);
+      setOstError(`${err}`);
+    } finally {
+      setIsSearchingOst(false);
+    }
+  };
+
+  const applyOstMatch = (item: LierkourOstCandidate) => {
+    if (item.poster_data_uri) {
+      setArtworkPreview(item.poster_data_uri);
+      setRemoveArtwork(false);
+    }
+    setFormData((prev) => ({
+      ...prev,
+      album: `${item.original_title || item.title} OST`,
+      artist: prev.artist || item.creator || prev.artist,
+      year: item.year || prev.year,
+      genre: item.genres || prev.genre || 'Soundtrack',
+      new_artwork_base64: item.poster_data_uri || prev.new_artwork_base64,
+      remove_artwork: item.poster_data_uri ? false : prev.remove_artwork,
+    }));
+    setShowOstDropdown(false);
+  };
+
   return (
     <div className="w-84 lg:w-96 bg-[#18191f] border border-[#2b2d37] rounded-lg flex flex-col h-full shadow-lg overflow-hidden">
       {/* Header with Reload and MusicBrainz */}
@@ -294,6 +338,16 @@ export const EditPanel: React.FC<EditPanelProps> = ({
           </button>
 
           <button
+            onClick={handleSearchLierkourOst}
+            disabled={isSearchingOst}
+            className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-[#272935] hover:bg-[#323544] text-[#E0E2EC] transition-colors border border-[#8B0000]/50 cursor-pointer"
+            title="Найти фильм или игру в запущенном Lierkour (:8765) для тегов OST и обложки"
+          >
+            {isSearchingOst ? <RefreshCw className="w-3 h-3 animate-spin text-[#39C5BB]" /> : <Film className="w-3 h-3 text-[#39C5BB]" />}
+            <span>OST</span>
+          </button>
+
+          <button
             onClick={handleSearchMusicBrainz}
             disabled={isSearchingMb}
             className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded bg-[#272935] hover:bg-[#323544] text-[#39C5BB] transition-colors border border-[#39C5BB]/20 cursor-pointer"
@@ -304,6 +358,31 @@ export const EditPanel: React.FC<EditPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Lierkour OST match dropdown */}
+      {showOstDropdown && (
+        <div className="bg-[#21232d] border-b border-[#2b2d37] p-2 max-h-48 overflow-y-auto">
+          <div className="flex justify-between items-center text-[11px] text-[#9EA2B0] mb-1 px-1">
+            <span>Lierkour OST:</span>
+            <button onClick={() => setShowOstDropdown(false)} className="text-[#39C5BB] hover:underline cursor-pointer">
+              Закрыть
+            </button>
+          </div>
+          {ostError && <div className="text-[11px] text-[#f87171] px-1 py-1">{ostError}</div>}
+          {ostResults.map((m) => (
+            <div
+              key={m.id}
+              onClick={() => applyOstMatch(m)}
+              className="p-2 text-xs rounded hover:bg-[#2c2f3d] cursor-pointer border border-transparent hover:border-[#39C5BB]/30 transition-colors"
+            >
+              <div className="font-semibold text-white">{m.title}</div>
+              <div className="text-[#A2A6B7] text-[11px]">
+                {m.media_type} · {m.creator || '—'} {m.year ? `(${m.year})` : ''}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* MusicBrainz match dropdown */}
       {showMbDropdown && mbResults.length > 0 && (

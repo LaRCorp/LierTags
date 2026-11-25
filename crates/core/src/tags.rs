@@ -1,6 +1,4 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use base64::Engine;
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -10,9 +8,11 @@ use lofty::probe::Probe;
 use lofty::tag::items::Timestamp;
 use lofty::tag::{ItemKey, Tag, TagType};
 use rayon::prelude::*;
+use std::fs;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::cache::{get_file_mtime_secs, LibraryCache};
+use crate::cache::{LibraryCache, get_file_mtime_secs};
 use crate::models::{AudioProperties, SaveTrackPayload, Track, TrackMetadata};
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "opus", "m4a", "mp4", "wav", "aiff"];
@@ -66,7 +66,8 @@ pub fn read_track_summary(path: &Path) -> Result<Track> {
         .primary_tag()
         .or_else(|| tagged_file.first_tag());
 
-    let (lyrics, is_synced_lyrics) = crate::lyrics::read_lyrics_from_tagged_file(&tagged_file, path);
+    let (lyrics, is_synced_lyrics) =
+        crate::lyrics::read_lyrics_from_tagged_file(&tagged_file, path);
 
     let metadata = if let Some(tag) = primary_or_first {
         let picture = tag
@@ -76,7 +77,9 @@ pub fn read_track_summary(path: &Path) -> Result<Track> {
             .or_else(|| tag.pictures().first());
 
         let has_artwork = picture.is_some();
-        let artwork_mime = picture.and_then(|p| p.mime_type()).map(|m| m.as_str().to_string());
+        let artwork_mime = picture
+            .and_then(|p| p.mime_type())
+            .map(|m| m.as_str().to_string());
 
         let clean_str = |opt: Option<std::borrow::Cow<'_, str>>| {
             opt.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
@@ -131,7 +134,9 @@ pub fn read_track(path: &Path) -> Result<Track> {
 /// Extract front cover or first artwork from a file as base64 data URI
 pub fn read_track_artwork(path: &Path) -> Result<Option<String>> {
     let tagged_file = Probe::open(path)?.read()?;
-    let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
 
     if let Some(tag) = tag {
         let picture = tag
@@ -198,20 +203,23 @@ pub fn scan_folder(folder_path: &Path, recursive: bool) -> Result<Vec<Track>> {
     if !uncached_entries.is_empty() {
         let freshly_parsed: Vec<(Track, u64)> = uncached_entries
             .par_iter()
-            .filter_map(|(path, mtime)| {
-                match read_track_summary(path) {
-                    Ok(t) => Some((t, *mtime)),
-                    Err(err) => {
-                        eprintln!("Warning: skipping unreadable audio file {}: {}", path.display(), err);
-                        None
-                    }
+            .filter_map(|(path, mtime)| match read_track_summary(path) {
+                Ok(t) => Some((t, *mtime)),
+                Err(err) => {
+                    eprintln!(
+                        "Warning: skipping unreadable audio file {}: {}",
+                        path.display(),
+                        err
+                    );
+                    None
                 }
             })
             .collect();
 
         // 4. Batch update SQLite cache
         if let Some(ref c) = cache {
-            let ref_slice: Vec<(&Track, u64)> = freshly_parsed.iter().map(|(t, m)| (t, *m)).collect();
+            let ref_slice: Vec<(&Track, u64)> =
+                freshly_parsed.iter().map(|(t, m)| (t, *m)).collect();
             let _ = c.save_batch(&ref_slice);
         }
 
@@ -252,13 +260,12 @@ pub fn read_files(file_paths: &[PathBuf]) -> Result<Vec<Track>> {
     if !uncached.is_empty() {
         let freshly_parsed: Vec<(Track, u64)> = uncached
             .par_iter()
-            .filter_map(|(path, mtime)| {
-                read_track_summary(path).ok().map(|t| (t, *mtime))
-            })
+            .filter_map(|(path, mtime)| read_track_summary(path).ok().map(|t| (t, *mtime)))
             .collect();
 
         if let Some(ref c) = cache {
-            let ref_slice: Vec<(&Track, u64)> = freshly_parsed.iter().map(|(t, m)| (t, *m)).collect();
+            let ref_slice: Vec<(&Track, u64)> =
+                freshly_parsed.iter().map(|(t, m)| (t, *m)).collect();
             let _ = c.save_batch(&ref_slice);
         }
 
@@ -283,11 +290,31 @@ pub fn save_track(payload: &SaveTrackPayload) -> Result<Track> {
         .read()
         .with_context(|| format!("Failed to read audio file: {}", path.display()))?;
 
-    let clean_title = payload.title.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let clean_artist = payload.artist.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let clean_album = payload.album.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let clean_genre = payload.genre.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let clean_comment = payload.comment.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let clean_title = payload
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let clean_artist = payload
+        .artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let clean_album = payload
+        .album
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let clean_genre = payload
+        .genre
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let clean_comment = payload
+        .comment
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
 
     let new_picture = if let Some(ref artwork_b64) = payload.new_artwork_base64 {
         let (raw_bytes, detected_mime) = parse_base64_artwork(artwork_b64)?;
@@ -428,7 +455,8 @@ pub fn save_track(payload: &SaveTrackPayload) -> Result<Track> {
     }
 
     // Save all tags across the file
-    tagged_file.save_to_path(path, WriteOptions::default())
+    tagged_file
+        .save_to_path(path, WriteOptions::default())
         .with_context(|| format!("Failed to save audio tags to: {}", path.display()))?;
 
     // Re-read updated track
@@ -477,8 +505,8 @@ pub fn md5_hash(bytes: &[u8]) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use lofty::tag::TagType;
+    use std::io::Write;
 
     fn create_test_wav(path: &Path) {
         let mut f = fs::File::create(path).unwrap();
@@ -522,7 +550,11 @@ mod tests {
             let tagged_file = Probe::open(&mp3_path).unwrap().read().unwrap();
             println!("Initial MP3 tags count: {}", tagged_file.tags().len());
             for t in tagged_file.tags() {
-                println!("Initial MP3 tag: {:?}, album: {:?}", t.tag_type(), t.album());
+                println!(
+                    "Initial MP3 tag: {:?}, album: {:?}",
+                    t.tag_type(),
+                    t.album()
+                );
             }
         }
 
@@ -565,7 +597,12 @@ mod tests {
 
         let tagged_file_after = Probe::open(&mp3_path).unwrap().read().unwrap();
         for t in tagged_file_after.tags() {
-            assert_eq!(t.album(), None, "Tag {:?} must have album cleared", t.tag_type());
+            assert_eq!(
+                t.album(),
+                None,
+                "Tag {:?} must have album cleared",
+                t.tag_type()
+            );
         }
 
         let _ = fs::remove_file(&mp3_path);
@@ -581,7 +618,9 @@ mod tests {
 
         let mut id3_tag = Tag::new(TagType::Id3v2);
         id3_tag.set_album("Initial Album".to_string());
-        id3_tag.save_to_path(&wav_path, WriteOptions::default()).unwrap();
+        id3_tag
+            .save_to_path(&wav_path, WriteOptions::default())
+            .unwrap();
 
         let payload_empty_str = SaveTrackPayload {
             file_path: wav_path.to_string_lossy().to_string(),
@@ -604,7 +643,12 @@ mod tests {
 
         let tagged_file_after = Probe::open(&wav_path).unwrap().read().unwrap();
         for t in tagged_file_after.tags() {
-            assert_eq!(t.album(), None, "Tag {:?} must have album cleared when empty string passed", t.tag_type());
+            assert_eq!(
+                t.album(),
+                None,
+                "Tag {:?} must have album cleared when empty string passed",
+                t.tag_type()
+            );
         }
 
         let _ = fs::remove_file(&wav_path);
@@ -622,11 +666,15 @@ mod tests {
         {
             let mut riff_tag = Tag::new(TagType::RiffInfo);
             riff_tag.set_album("Old Riff Album".to_string());
-            riff_tag.save_to_path(&wav_path, WriteOptions::default()).unwrap();
+            riff_tag
+                .save_to_path(&wav_path, WriteOptions::default())
+                .unwrap();
 
             let mut id3_tag = Tag::new(TagType::Id3v2);
             id3_tag.set_album("Old ID3 Album".to_string());
-            id3_tag.save_to_path(&wav_path, WriteOptions::default()).unwrap();
+            id3_tag
+                .save_to_path(&wav_path, WriteOptions::default())
+                .unwrap();
         }
 
         // Verify file has 2 tags
@@ -660,7 +708,12 @@ mod tests {
 
         let tagged_file_after = Probe::open(&wav_path).unwrap().read().unwrap();
         for t in tagged_file_after.tags() {
-            assert_eq!(t.album(), None, "Tag {:?} must have album cleared", t.tag_type());
+            assert_eq!(
+                t.album(),
+                None,
+                "Tag {:?} must have album cleared",
+                t.tag_type()
+            );
         }
 
         let _ = fs::remove_file(&wav_path);

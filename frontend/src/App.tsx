@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Track, SaveTrackPayload, ImportPayload, MusicBrainzRecording, DropResult } from './types';
+import { Track, SaveTrackPayload, ImportPayload, MusicBrainzRecording, DropResult, EcosystemAppStatus, LierSyncSendResult } from './types';
 import { TrackTable } from './components/TrackTable';
 import { EditPanel } from './components/EditPanel';
 import { ImportModal } from './components/ImportModal';
@@ -21,6 +21,8 @@ import {
   FolderTree,
   Copy,
   X,
+  Send,
+  Globe,
 } from 'lucide-react';
 
 const LAST_FOLDER_KEY = 'liertags_last_folder';
@@ -37,6 +39,10 @@ export const App: React.FC = () => {
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'library' | 'organizer' | 'duplicates'>('library');
   const [checkedTrackIds, setCheckedTrackIds] = useState<Set<string>>(new Set());
+  const [showEcosystemModal, setShowEcosystemModal] = useState<boolean>(false);
+  const [ecosystemApps, setEcosystemApps] = useState<EcosystemAppStatus[]>([]);
+  const [ecosystemBanner, setEcosystemBanner] = useState<string | null>(null);
+  const [isSendingToSync, setIsSendingToSync] = useState<boolean>(false);
 
   // Active track derived from selected ID
   const activeTrack = tracks.find((t) => t.id === selectedTrackId) || null;
@@ -402,6 +408,51 @@ export const App: React.FC = () => {
     setActiveTab('organizer');
   };
 
+  const refreshEcosystem = async () => {
+    try {
+      const apps = await invoke<EcosystemAppStatus[]>('probe_lier_ecosystem');
+      setEcosystemApps(apps);
+    } catch (err) {
+      console.warn('Ecosystem probe failed:', err);
+    }
+  };
+
+  useEffect(() => {
+    refreshEcosystem();
+  }, []);
+
+  const handleSendToLierSync = async () => {
+    const selectedPaths =
+      checkedTrackIds.size > 0
+        ? tracks.filter((t) => checkedTrackIds.has(t.id)).map((t) => t.file_path)
+        : activeTrack
+        ? [activeTrack.file_path]
+        : currentFolder
+        ? [currentFolder]
+        : [];
+
+    if (selectedPaths.length === 0) {
+      setEcosystemBanner('Выберите треки или откройте папку для отправки в LierSync');
+      return;
+    }
+
+    setIsSendingToSync(true);
+    setEcosystemBanner(null);
+    try {
+      const res = await invoke<LierSyncSendResult>('send_paths_to_liersync', {
+        paths: selectedPaths,
+        target: null,
+      });
+      setEcosystemBanner(
+        `Отправлено через LierSync (${res.target || 'пир'}): ${res.sent_files} файл(ов)`
+      );
+    } catch (err) {
+      setEcosystemBanner(`Ошибка LierSync: ${err}`);
+    } finally {
+      setIsSendingToSync(false);
+    }
+  };
+
   return (
     <div
       onDragOver={(e) => {
@@ -430,7 +481,7 @@ export const App: React.FC = () => {
             <span>LierTags</span>
           </div>
           <span className="text-[11px] px-2 py-0.5 rounded bg-[#252733] text-[#39C5BB] font-mono border border-[#39C5BB]/20">
-            v0.1.0
+            v1.1
           </span>
           <div className="h-4 w-px bg-[#323544] mx-1" />
 
@@ -538,14 +589,48 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          {/* LierEX-Q local server indicator */}
-          <div className="flex items-center gap-2 px-2.5 py-1 bg-[#15161c] border border-[#292b37] rounded-md text-xs">
+          {/* Send selected / active track / folder to LierSync */}
+          <button
+            onClick={handleSendToLierSync}
+            disabled={isSendingToSync}
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-[#262833] hover:bg-[#323544] text-[#39C5BB] border border-[#39C5BB]/30 transition-colors cursor-pointer"
+            title="Передать выбранные треки (или текущий трек/папку) на телефон или ПК через LierSync (:8768)"
+          >
+            {isSendingToSync ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Send className="w-3.5 h-3.5" />
+            )}
+            <span>В LierSync</span>
+          </button>
+
+          {/* LIER Ecosystem status & LierEX-Q local server indicator */}
+          <button
+            onClick={() => {
+              setShowEcosystemModal(true);
+              refreshEcosystem();
+            }}
+            className="flex items-center gap-2 px-2.5 py-1 bg-[#15161c] hover:bg-[#1f212b] border border-[#292b37] rounded-md text-xs cursor-pointer transition-colors"
+            title="Статус экосистемы LIER и локальных мостов"
+          >
             <Radio className="w-3.5 h-3.5 text-[#39C5BB] animate-pulse" />
-            <span className="text-[11px] text-[#A6AAB8]">LierEX (8766):</span>
-            <span className="text-[11px] font-semibold text-[#39C5BB]">Готов</span>
-          </div>
+            <span className="text-[11px] text-[#A6AAB8]">LIER (8766)</span>
+            <Globe className="w-3.5 h-3.5 text-[#8B0000]" />
+          </button>
         </div>
       </header>
+
+      {ecosystemBanner && (
+        <div className="px-4 py-1.5 bg-[#1b2226] border-b border-[#39C5BB]/30 text-xs text-[#E0E2EC] flex items-center justify-between">
+          <span>{ecosystemBanner}</span>
+          <button
+            onClick={() => setEcosystemBanner(null)}
+            className="text-[#8E92A2] hover:text-white cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Main Workspace Body */}
       <main className="flex-1 flex gap-3 p-3 overflow-hidden">
@@ -603,6 +688,68 @@ export const App: React.FC = () => {
         onApply={handleApplyImport}
         onClose={() => setImportModalPayload(null)}
       />
+
+      {/* LIER Ecosystem & About Modal */}
+      {showEcosystemModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-[#181920] border border-[#2e313e] rounded-lg shadow-2xl overflow-hidden">
+            <div className="px-4 py-3 bg-[#1f2027] border-b border-[#2e313e] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Globe className="w-4 h-4 text-[#39C5BB]" />
+                <span className="font-semibold text-sm text-white">Экосистема LIER · LierTags v1.1</span>
+              </div>
+              <button
+                onClick={() => setShowEcosystemModal(false)}
+                className="text-[#8E92A2] hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 text-xs">
+              <div className="space-y-2">
+                {ecosystemApps.map((app) => (
+                  <div
+                    key={app.id}
+                    className="flex items-center justify-between p-2 rounded bg-[#121317] border border-[#292c3a]"
+                  >
+                    <div>
+                      <div className="font-semibold text-white">{app.name}</div>
+                      <div className="text-[11px] text-[#828698]">127.0.0.1:{app.port}</div>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded font-mono ${
+                        app.online
+                          ? 'bg-[#39C5BB]/15 text-[#39C5BB]'
+                          : 'bg-[#262833] text-[#828698]'
+                      }`}
+                    >
+                      {app.online ? `ONLINE (${app.detail})` : 'offline'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="pt-2 border-t border-[#292c3a] text-[#9EA2B0] space-y-1">
+                <div>Разработчик: LaRevole (LaRCorp)</div>
+                <div>Лицензия: GNU General Public License v3.0 (GPLv3)</div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  onClick={refreshEcosystem}
+                  className="px-3 py-1.5 rounded bg-[#262833] hover:bg-[#323544] text-[#39C5BB] border border-[#36394a] cursor-pointer"
+                >
+                  Обновить статус
+                </button>
+                <button
+                  onClick={() => setShowEcosystemModal(false)}
+                  className="px-3 py-1.5 rounded bg-[#8B0000] hover:bg-[#a00000] text-white cursor-pointer"
+                >
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,8 +1,8 @@
+use anyhow::Result;
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
 
-use crate::cache::{get_file_mtime_secs, LibraryCache};
+use crate::cache::{LibraryCache, get_file_mtime_secs};
 use crate::models::{OrganizeAction, OrganizePreviewItem, OrganizeSummary, Track};
 use crate::tags::read_track_summary;
 
@@ -25,8 +25,8 @@ pub fn sanitize_path_segment(segment: &str) -> String {
     // Check reserved Windows device names
     let upper = trimmed.to_uppercase();
     let reserved = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
 
     if trimmed.is_empty() {
@@ -106,7 +106,9 @@ pub fn resolve_relative_destination(track: &Track, template: &str) -> String {
         let is_last = idx == segments.len() - 1;
 
         let mut replaced = seg.to_string();
-        replaced = replaced.replace("{Artist}", artist).replace("{artist}", artist);
+        replaced = replaced
+            .replace("{Artist}", artist)
+            .replace("{artist}", artist);
         replaced = replaced.replace("{Album}", album).replace("{album}", album);
         replaced = replaced.replace("{Title}", title).replace("{title}", title);
         replaced = replaced
@@ -153,12 +155,18 @@ pub fn preview_organization(
         .map(|track| {
             let original_p = Path::new(&track.file_path);
             let rel_dest = resolve_relative_destination(track, template);
-            let full_dest = base_dest_folder.join(rel_dest.replace('/', std::path::MAIN_SEPARATOR_STR));
+            let full_dest =
+                base_dest_folder.join(rel_dest.replace('/', std::path::MAIN_SEPARATOR_STR));
 
-            let original_canon = original_p.canonicalize().unwrap_or_else(|_| original_p.to_path_buf());
-            let dest_canon = full_dest.canonicalize().unwrap_or_else(|_| full_dest.clone());
+            let original_canon = original_p
+                .canonicalize()
+                .unwrap_or_else(|_| original_p.to_path_buf());
+            let dest_canon = full_dest
+                .canonicalize()
+                .unwrap_or_else(|_| full_dest.clone());
 
-            let is_missing_metadata = track.metadata.artist.is_none() && track.metadata.title.is_none();
+            let is_missing_metadata =
+                track.metadata.artist.is_none() && track.metadata.title.is_none();
 
             let (status, will_move) = if original_canon == dest_canon {
                 ("identical".to_string(), false)
@@ -193,13 +201,18 @@ pub fn organize_files(actions: &[OrganizeAction]) -> Result<OrganizeSummary> {
 
         if src == dst {
             summary.skipped_count += 1;
-            summary.logs.push(format!("Пропущено (пути совпадают): {}", src.display()));
+            summary
+                .logs
+                .push(format!("Пропущено (пути совпадают): {}", src.display()));
             continue;
         }
 
         if !src.exists() {
             summary.error_count += 1;
-            summary.logs.push(format!("Ошибка: исходный файл не существует: {}", src.display()));
+            summary.logs.push(format!(
+                "Ошибка: исходный файл не существует: {}",
+                src.display()
+            ));
             continue;
         }
 
@@ -227,9 +240,8 @@ pub fn organize_files(actions: &[OrganizeAction]) -> Result<OrganizeSummary> {
         }
 
         // Try atomic rename; if fails (e.g. cross-drive move), fallback to copy + remove
-        let move_result = fs::rename(src, dst).or_else(|_| {
-            fs::copy(src, dst).and_then(|_| fs::remove_file(src))
-        });
+        let move_result =
+            fs::rename(src, dst).or_else(|_| fs::copy(src, dst).and_then(|_| fs::remove_file(src)));
 
         match move_result {
             Ok(()) => {
@@ -261,11 +273,9 @@ pub fn organize_files(actions: &[OrganizeAction]) -> Result<OrganizeSummary> {
             }
             Err(err) => {
                 summary.error_count += 1;
-                summary.logs.push(format!(
-                    "Ошибка перемещения {}: {}",
-                    src.display(),
-                    err
-                ));
+                summary
+                    .logs
+                    .push(format!("Ошибка перемещения {}: {}", src.display(), err));
             }
         }
     }

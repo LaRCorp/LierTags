@@ -1,15 +1,18 @@
 <div align="center">
   <img src="src-tauri/icons/logo.png" width="96" height="96" alt="LierTags Logo" />
-  <h1>🎵🏷️ LierTags v0.1 — Быстрый редактор аудиотегов</h1>
+  <h1>🎵🏷️ LierTags v1.1 — Быстрый редактор аудиотегов</h1>
   <p><strong>Локальный высокопроизводительный редактор тегов и обложек музыкальных треков на Rust и Tauri 2</strong></p>
 
   <p>
-    <a href="https://github.com/LaRCorp/LierTags/releases"><img src="https://img.shields.io/badge/version-0.1.0-6366f1?style=flat-square" alt="Version 0.1.0" /></a>
+    <a href="README.md"><img src="https://img.shields.io/badge/Язык-Русский-8B0000?style=flat-square" alt="Русский" /></a>
+    <a href="README_EN.md"><img src="https://img.shields.io/badge/Language-English-39C5BB?style=flat-square" alt="English" /></a>
+    <a href="https://github.com/LaRCorp/LierTags/releases"><img src="https://img.shields.io/badge/release-v1.1-6366f1?style=flat-square" alt="Version 1.1" /></a>
     <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-0ea5e9?style=flat-square" alt="Windows | Linux" />
     <img src="https://img.shields.io/badge/Tauri%202-React%2019%20%7C%20Rust-8b5cf6?style=flat-square" alt="Tauri 2 + React 19 + Rust" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-10b981?style=flat-square" alt="GPLv3 License" /></a>
-    <a href="https://github.com/LaRCorp/LierEX-Q"><img src="https://img.shields.io/badge/Companion-LierEX--Q_v1.3%2B-f59e0b?style=flat-square" alt="LierEX-Q v1.3+" /></a>
-    <a href="https://github.com/LaRCorp/Lierkour"><img src="https://img.shields.io/badge/Companion-Lierkour_v2.2%2B-8b5cf6?style=flat-square" alt="Lierkour v2.2+" /></a>
+    <a href="https://github.com/LaRCorp/LierEX-Q"><img src="https://img.shields.io/badge/Companion-LierEX--Q_v1.4%2B-f59e0b?style=flat-square" alt="LierEX-Q v1.4+" /></a>
+    <a href="https://github.com/LaRCorp/Lierkour"><img src="https://img.shields.io/badge/Companion-Lierkour_v2.3%2B-8b5cf6?style=flat-square" alt="Lierkour v2.3+" /></a>
+    <a href="https://github.com/LaRCorp/LierSync"><img src="https://img.shields.io/badge/Companion-LierSync_v1.2%2B-39C5BB?style=flat-square" alt="LierSync v1.2+" /></a>
   </p>
 </div>
 
@@ -167,8 +170,8 @@ LierTags/
 | Backend | Rust 2024 (`liertags-core`, `liertags-app`, `liertags-cli`) |
 | Аудиодвижок тегов | `lofty` 0.25 (чтение/запись ID3v1, ID3v2, Vorbis, MP4, FLAC, APE) |
 | Локальный кэш | `rusqlite` 0.41 (встроенный SQLite engine с WAL) |
-| HTTP-сервер (мост LierEX-Q) | `axum` 0.8 + `tokio` (только `127.0.0.1:8766`) |
-| HTTP-клиенты | `reqwest` 0.12 / `ureq` 3.5 с `rustls` (для MusicBrainz и Cover Art) |
+| HTTP-сервер (мост LIER) | `axum` 0.8 + `tokio` (`127.0.0.1:8766`, `/api/lier/info`, `/api/ost/from-lierkour`) |
+| HTTP-клиент | `ureq` 3.5 с `rustls` (MusicBrainz, Cover Art и мосты экосистемы LIER) |
 | Обработка изображений | `image` 0.25 (валидация, масштабирование обложек) |
 | Параллелизм | `rayon` 1.10 (быстрое параллельное сканирование директорий) |
 
@@ -265,5 +268,6 @@ Copyright (c) 2026 LaRevole.
 ---
 
 ### Связанные проекты экосистемы
-- 🌐 **[LaRCorp/LierEX-Q](https://github.com/LaRCorp/LierEX-Q)** — браузерное расширение для извлечения треков, фильмов и видеоигр в 1 клик.
+- ⚡🔄 **[LaRCorp/LierSync](https://github.com/LaRCorp/LierSync)** — быстрая P2P-передача файлов, синхронизация папок и буфера обмена между ПК и Android.
+- 🌐 **[LaRCorp/LierEX-Q](https://github.com/LaRCorp/LierEX-Q)** — браузерное расширение для извлечения треков, фильмов, видеоигр и быстрой отправки в LierSync.
 - 🎮🎬 **[LaRCorp/Lierkour](https://github.com/LaRCorp/Lierkour)** — локальный кроссплатформенный каталогизатор фильмов, сериалов, аниме и видеоигр.

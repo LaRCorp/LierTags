@@ -1,10 +1,10 @@
+use anyhow::Result;
+use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
-use anyhow::Result;
-use rayon::prelude::*;
-use sha2::{Digest, Sha256};
 
 use crate::cache::LibraryCache;
 use crate::models::{DeleteSummary, DuplicateFileItem, DuplicateGroup, DuplicateMode, Track};
@@ -66,7 +66,10 @@ pub fn find_duplicates(tracks: &[Track], mode: DuplicateMode) -> Vec<DuplicateGr
                     groups.push(build_duplicate_group(
                         title,
                         artist,
-                        format!("Одинаковый размер ({} байт) и длительность ({} сек)", size, duration),
+                        format!(
+                            "Одинаковый размер ({} байт) и длительность ({} сек)",
+                            size, duration
+                        ),
                         items,
                     ));
                 }
@@ -194,7 +197,10 @@ fn build_duplicate_group(
             .then_with(|| b.file_size_bytes.cmp(&a.file_size_bytes))
     });
 
-    let group_id = format!("{:x}", crate::tags::md5_hash(format!("{}:{:?}", title, artist).as_bytes()));
+    let group_id = format!(
+        "{:x}",
+        crate::tags::md5_hash(format!("{}:{:?}", title, artist).as_bytes())
+    );
 
     DuplicateGroup {
         group_id,
@@ -214,7 +220,9 @@ pub fn delete_duplicate_files(file_paths: &[String]) -> Result<DeleteSummary> {
         let path = Path::new(path_str);
         if !path.exists() {
             summary.failed_count += 1;
-            summary.logs.push(format!("Файл не найден для удаления: {}", path_str));
+            summary
+                .logs
+                .push(format!("Файл не найден для удаления: {}", path_str));
             continue;
         }
 
@@ -236,7 +244,9 @@ pub fn delete_duplicate_files(file_paths: &[String]) -> Result<DeleteSummary> {
             }
             Err(err) => {
                 summary.failed_count += 1;
-                summary.logs.push(format!("Не удалось удалить {}: {}", path_str, err));
+                summary
+                    .logs
+                    .push(format!("Не удалось удалить {}: {}", path_str, err));
             }
         }
     }

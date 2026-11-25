@@ -1,8 +1,8 @@
+use anyhow::{Context, Result};
+use rusqlite::{Connection, params};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
 
 use crate::models::{AudioProperties, Track, TrackMetadata};
 
@@ -34,8 +34,12 @@ impl LibraryCache {
     }
 
     fn connect(&self) -> Result<Connection> {
-        let conn = Connection::open(&self.db_path)
-            .with_context(|| format!("Failed to open cache database at {}", self.db_path.display()))?;
+        let conn = Connection::open(&self.db_path).with_context(|| {
+            format!(
+                "Failed to open cache database at {}",
+                self.db_path.display()
+            )
+        })?;
         // WAL mode for fast concurrent reading/writing
         let _ = conn.pragma_update(None, "journal_mode", "WAL");
         let _ = conn.pragma_update(None, "synchronous", "NORMAL");
@@ -73,7 +77,10 @@ impl LibraryCache {
 
         // Safe migrations for existing databases
         let _ = conn.execute("ALTER TABLE track_cache ADD COLUMN lyrics TEXT", []);
-        let _ = conn.execute("ALTER TABLE track_cache ADD COLUMN is_synced_lyrics INTEGER DEFAULT 0", []);
+        let _ = conn.execute(
+            "ALTER TABLE track_cache ADD COLUMN is_synced_lyrics INTEGER DEFAULT 0",
+            [],
+        );
 
         Ok(())
     }
@@ -153,7 +160,14 @@ impl LibraryCache {
                 dirty: false,
             };
 
-            Ok((file_path, TrackCacheEntry { file_size, mtime, track }))
+            Ok((
+                file_path,
+                TrackCacheEntry {
+                    file_size,
+                    mtime,
+                    track,
+                },
+            ))
         });
 
         if let Ok(entries) = rows {
@@ -177,61 +191,63 @@ impl LibraryCache {
              WHERE file_path = ?1 AND file_size = ?2 AND mtime = ?3",
         ).ok()?;
 
-        let mut rows = stmt.query_map(params![path_str, file_size as i64, mtime as i64], |row| {
-            let file_path: String = row.get(0)?;
-            let file_name: String = row.get(1)?;
-            let extension: String = row.get(4)?;
+        let mut rows = stmt
+            .query_map(params![path_str, file_size as i64, mtime as i64], |row| {
+                let file_path: String = row.get(0)?;
+                let file_name: String = row.get(1)?;
+                let extension: String = row.get(4)?;
 
-            let title: Option<String> = row.get(5)?;
-            let artist: Option<String> = row.get(6)?;
-            let album: Option<String> = row.get(7)?;
-            let year: Option<u32> = row.get(8)?;
-            let genre: Option<String> = row.get(9)?;
-            let track_number: Option<u32> = row.get(10)?;
-            let track_total: Option<u32> = row.get(11)?;
-            let comment: Option<String> = row.get(12)?;
-            let lyrics: Option<String> = row.get(13)?;
-            let is_synced_lyrics: bool = row.get::<_, i64>(14).unwrap_or(0) != 0;
-            let has_artwork: bool = row.get::<_, i64>(15)? != 0;
-            let artwork_mime: Option<String> = row.get(16)?;
+                let title: Option<String> = row.get(5)?;
+                let artist: Option<String> = row.get(6)?;
+                let album: Option<String> = row.get(7)?;
+                let year: Option<u32> = row.get(8)?;
+                let genre: Option<String> = row.get(9)?;
+                let track_number: Option<u32> = row.get(10)?;
+                let track_total: Option<u32> = row.get(11)?;
+                let comment: Option<String> = row.get(12)?;
+                let lyrics: Option<String> = row.get(13)?;
+                let is_synced_lyrics: bool = row.get::<_, i64>(14).unwrap_or(0) != 0;
+                let has_artwork: bool = row.get::<_, i64>(15)? != 0;
+                let artwork_mime: Option<String> = row.get(16)?;
 
-            let duration_seconds: u64 = row.get::<_, i64>(17)? as u64;
-            let bitrate_kbps: Option<u32> = row.get(18)?;
-            let sample_rate_hz: Option<u32> = row.get(19)?;
-            let channels: Option<u8> = row.get(20)?;
+                let duration_seconds: u64 = row.get::<_, i64>(17)? as u64;
+                let bitrate_kbps: Option<u32> = row.get(18)?;
+                let sample_rate_hz: Option<u32> = row.get(19)?;
+                let channels: Option<u8> = row.get(20)?;
 
-            let id = format!("{:x}", crate::tags::md5_hash(file_path.as_bytes()));
+                let id = format!("{:x}", crate::tags::md5_hash(file_path.as_bytes()));
 
-            Ok(Track {
-                id,
-                file_path,
-                file_name,
-                file_size_bytes: file_size,
-                extension,
-                metadata: TrackMetadata {
-                    title,
-                    artist,
-                    album,
-                    year,
-                    genre,
-                    track_number,
-                    track_total,
-                    comment,
-                    lyrics,
-                    is_synced_lyrics,
-                    has_artwork,
-                    artwork_mime,
-                    artwork_base64: None,
-                },
-                properties: AudioProperties {
-                    duration_seconds,
-                    bitrate_kbps,
-                    sample_rate_hz,
-                    channels,
-                },
-                dirty: false,
+                Ok(Track {
+                    id,
+                    file_path,
+                    file_name,
+                    file_size_bytes: file_size,
+                    extension,
+                    metadata: TrackMetadata {
+                        title,
+                        artist,
+                        album,
+                        year,
+                        genre,
+                        track_number,
+                        track_total,
+                        comment,
+                        lyrics,
+                        is_synced_lyrics,
+                        has_artwork,
+                        artwork_mime,
+                        artwork_base64: None,
+                    },
+                    properties: AudioProperties {
+                        duration_seconds,
+                        bitrate_kbps,
+                        sample_rate_hz,
+                        channels,
+                    },
+                    dirty: false,
+                })
             })
-        }).ok()?;
+            .ok()?;
 
         rows.next()?.ok()
     }
@@ -292,8 +308,16 @@ impl LibraryCache {
                     track.metadata.track_total,
                     track.metadata.comment,
                     track.metadata.lyrics,
-                    if track.metadata.is_synced_lyrics { 1i64 } else { 0i64 },
-                    if track.metadata.has_artwork { 1i64 } else { 0i64 },
+                    if track.metadata.is_synced_lyrics {
+                        1i64
+                    } else {
+                        0i64
+                    },
+                    if track.metadata.has_artwork {
+                        1i64
+                    } else {
+                        0i64
+                    },
                     track.metadata.artwork_mime,
                     track.properties.duration_seconds as i64,
                     track.properties.bitrate_kbps,
@@ -315,7 +339,10 @@ impl LibraryCache {
     /// Remove a single file path from cache
     pub fn remove_path(&self, file_path: &str) -> Result<()> {
         let conn = self.connect()?;
-        conn.execute("DELETE FROM track_cache WHERE file_path = ?1", params![file_path])?;
+        conn.execute(
+            "DELETE FROM track_cache WHERE file_path = ?1",
+            params![file_path],
+        )?;
         Ok(())
     }
 
@@ -378,10 +405,10 @@ impl LibraryCache {
         // 1. Total count query
         let count_sql = format!("SELECT COUNT(*) FROM track_cache {}", where_clause);
         let mut count_stmt = conn.prepare(&count_sql)?;
-        let total_count: i64 = count_stmt.query_row(
-            rusqlite::params_from_iter(query_params.iter()),
-            |row| row.get(0),
-        )?;
+        let total_count: i64 = count_stmt
+            .query_row(rusqlite::params_from_iter(query_params.iter()), |row| {
+                row.get(0)
+            })?;
 
         // 2. Paginated rows query
         let rows_sql = format!(

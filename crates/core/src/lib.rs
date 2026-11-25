@@ -1,6 +1,7 @@
 pub mod api;
 pub mod cache;
 pub mod duplicates;
+pub mod ecosystem;
 pub mod lyrics;
 pub mod models;
 pub mod organizer;

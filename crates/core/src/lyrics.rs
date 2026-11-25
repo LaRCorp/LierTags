@@ -1,15 +1,15 @@
-use std::fs;
-use std::path::Path;
 use anyhow::{Context, Result};
 use lofty::config::WriteOptions;
 use lofty::file::{TaggedFile, TaggedFileExt};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::{ItemKey, Tag};
+use std::fs;
+use std::path::Path;
 
 use crate::models::LrcLibLyrics;
 
-const USER_AGENT: &str = "LierTags/0.1.0 (https://github.com/LaRevole/LierTags)";
+const USER_AGENT: &str = "LierTags/1.1.0 (https://github.com/LaRCorp/LierTags)";
 
 /// Search lyrics from LRCLIB open API
 pub async fn find_lyrics(
@@ -21,72 +21,75 @@ pub async fn find_lyrics(
     search_lrclib(title, artist, album, duration).await
 }
 
-/// Fetch lyrics from LRCLIB open API
+/// Fetch lyrics from LRCLIB open API using lightweight `ureq`
 pub async fn search_lrclib(
     title: &str,
     artist: Option<&str>,
     album: Option<&str>,
     duration: Option<u64>,
 ) -> Result<Option<LrcLibLyrics>> {
-    let client = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()?;
+    let title = title.to_string();
+    let artist = artist.map(|s| s.to_string());
+    let album = album.map(|s| s.to_string());
 
-    // 1. Try exact match /api/get if title and artist are present
-    if let Some(art) = artist {
-        let mut params = vec![
-            ("track_name", title.to_string()),
-            ("artist_name", art.to_string()),
-        ];
-        if let Some(alb) = album {
-            params.push(("album_name", alb.to_string()));
-        }
-        if let Some(d) = duration {
-            params.push(("duration", d.to_string()));
-        }
+    tokio::task::spawn_blocking(move || -> Result<Option<LrcLibLyrics>> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(10)))
+            .build()
+            .into();
 
-        let resp = client
-            .get("https://lrclib.net/api/get")
-            .query(&params)
-            .send()
-            .await;
+        // 1. Try exact match /api/get if title and artist are present
+        if let Some(ref art) = artist {
+            let mut req = agent
+                .get("https://lrclib.net/api/get")
+                .header("User-Agent", USER_AGENT)
+                .query("track_name", &title)
+                .query("artist_name", art);
+            if let Some(ref alb) = album {
+                req = req.query("album_name", alb);
+            }
+            if let Some(d) = duration {
+                req = req.query("duration", &d.to_string());
+            }
 
-        if let Ok(res) = resp {
-            if res.status().is_success() {
-                if let Ok(lyrics) = res.json::<LrcLibLyrics>().await {
+            if let Ok(mut res) = req.call() {
+                if let Ok(lyrics) = res.body_mut().read_json::<LrcLibLyrics>() {
                     if lyrics.plain_lyrics.is_some() || lyrics.synced_lyrics.is_some() {
                         return Ok(Some(lyrics));
                     }
                 }
             }
         }
-    }
 
-    // 2. Fallback to /api/search?q=... or track_name & artist_name search
-    let mut search_params = vec![("track_name", title.to_string())];
-    if let Some(art) = artist {
-        search_params.push(("artist_name", art.to_string()));
-    }
+        // 2. Fallback to /api/search?track_name=...&artist_name=...
+        let mut req = agent
+            .get("https://lrclib.net/api/search")
+            .header("User-Agent", USER_AGENT)
+            .query("track_name", &title);
+        if let Some(ref art) = artist {
+            req = req.query("artist_name", art);
+        }
 
-    let resp = client
-        .get("https://lrclib.net/api/search")
-        .query(&search_params)
-        .send()
-        .await
-        .context("Failed to query LRCLIB search API")?;
-
-    if resp.status().is_success() {
-        let items: Vec<LrcLibLyrics> = resp.json().await.unwrap_or_default();
-        if let Some(first) = items.into_iter().find(|l| l.plain_lyrics.is_some() || l.synced_lyrics.is_some()) {
+        let mut res = req.call().context("Failed to query LRCLIB search API")?;
+        let items: Vec<LrcLibLyrics> = res.body_mut().read_json().unwrap_or_default();
+        if let Some(first) = items
+            .into_iter()
+            .find(|l| l.plain_lyrics.is_some() || l.synced_lyrics.is_some())
+        {
             return Ok(Some(first));
         }
-    }
 
-    Ok(None)
+        Ok(None)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("LRCLIB task failed: {e}"))?
 }
 
 /// Read lyrics from an already probed TaggedFile or companion .lrc file
-pub fn read_lyrics_from_tagged_file(tagged_file: &TaggedFile, path: &Path) -> (Option<String>, bool) {
+pub fn read_lyrics_from_tagged_file(
+    tagged_file: &TaggedFile,
+    path: &Path,
+) -> (Option<String>, bool) {
     // 1. First check companion .lrc file next to the audio file
     let lrc_path = path.with_extension("lrc");
     if lrc_path.is_file() {
@@ -102,7 +105,10 @@ pub fn read_lyrics_from_tagged_file(tagged_file: &TaggedFile, path: &Path) -> (O
     // 2. Check embedded audio tags across all available tag formats (ID3v2, Vorbis, MP4, APE)
     for tag in tagged_file.tags() {
         // A. Check standard Lofty ItemKey::UnsyncLyrics (ID3v2 USLT) and ItemKey::Lyrics (Vorbis/MP4)
-        for str_val in tag.get_strings(ItemKey::UnsyncLyrics).chain(tag.get_strings(ItemKey::Lyrics)) {
+        for str_val in tag
+            .get_strings(ItemKey::UnsyncLyrics)
+            .chain(tag.get_strings(ItemKey::Lyrics))
+        {
             let trimmed = str_val.trim();
             if !trimmed.is_empty() {
                 let is_synced = is_synced_lrc(trimmed);
@@ -112,7 +118,8 @@ pub fn read_lyrics_from_tagged_file(tagged_file: &TaggedFile, path: &Path) -> (O
 
         // B. Also iterate all items for case-insensitive or custom lyrics tags
         for item in tag.items() {
-            let is_lyrics_key = item.key() == ItemKey::UnsyncLyrics || item.key() == ItemKey::Lyrics;
+            let is_lyrics_key =
+                item.key() == ItemKey::UnsyncLyrics || item.key() == ItemKey::Lyrics;
             let desc = item.description().to_ascii_lowercase();
             let is_lyrics_desc = desc.contains("lyrics") || desc.contains("unsynced");
 
@@ -151,11 +158,7 @@ pub fn read_lyrics_from_path(path: &Path) -> (Option<String>, bool) {
 }
 
 /// Save lyrics into audio file tags and optionally create .lrc companion file
-pub fn save_lyrics_to_file(
-    path: &Path,
-    lyrics_text: &str,
-    save_lrc_file: bool,
-) -> Result<()> {
+pub fn save_lyrics_to_file(path: &Path, lyrics_text: &str, save_lrc_file: bool) -> Result<()> {
     if !path.exists() {
         return Err(anyhow::anyhow!("File does not exist: {}", path.display()));
     }
@@ -172,7 +175,9 @@ pub fn save_lyrics_to_file(
         None => {
             let new_tag = Tag::new(tag_type);
             tagged_file.insert_tag(new_tag);
-            tagged_file.tag_mut(tag_type).ok_or_else(|| anyhow::anyhow!("Failed to create tag"))?
+            tagged_file
+                .tag_mut(tag_type)
+                .ok_or_else(|| anyhow::anyhow!("Failed to create tag"))?
         }
     };
 
@@ -198,7 +203,9 @@ pub fn save_lyrics_to_file(
 pub fn is_synced_lrc(text: &str) -> bool {
     text.lines().any(|line| {
         let trimmed = line.trim();
-        trimmed.starts_with('[') && trimmed.contains(']') && (trimmed.contains(':') || trimmed.contains('.'))
+        trimmed.starts_with('[')
+            && trimmed.contains(']')
+            && (trimmed.contains(':') || trimmed.contains('.'))
     })
 }
 
@@ -210,7 +217,9 @@ mod tests {
     fn test_is_synced_lrc() {
         assert!(is_synced_lrc("[00:12.34] Hello world"));
         assert!(is_synced_lrc("[01:23:45] Line with full timecode"));
-        assert!(!is_synced_lrc("Plain lyrics line 1\nLine 2 without timecode"));
+        assert!(!is_synced_lrc(
+            "Plain lyrics line 1\nLine 2 without timecode"
+        ));
         assert!(!is_synced_lrc("[Intro]\nSome guitar solo"));
     }
 
@@ -232,4 +241,3 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
-
